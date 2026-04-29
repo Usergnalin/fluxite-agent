@@ -4,9 +4,13 @@ Handles downloading, hashing, and initial setup of Minecraft server instances.
 
 import os
 import hashlib
+import zipfile
+import tarfile
 import requests
 import logging
 import subprocess
+import tempfile
+import shutil
 from utils import uuid7
 from config import SERVERS_BASE_DIR, REQUEST_TIMEOUT, FABRIC_INSTALLER_PATH, QUILT_INSTALLER_PATH, JVM_PATH, VANILLA_MANIFEST, NEOFORGE_INSTALLER_URL, FORGE_INSTALLER_URL, MODRINTH_USER_AGENT, INSTALLER_TIMEOUT, TMP_DIR
 
@@ -38,6 +42,102 @@ def download_file(url: str, dest_path: str, expected_hash: str = None, headers: 
     except Exception as e:
         log.error("Download failed: %s", e)
         return False
+
+
+def download_and_extract(url: str, extract_to: str, expected_hash: str = None, archive_type: str = "auto") -> bool:
+    """Download an archive file, verify its hash, and extract it to the specified directory.
+    
+    Args:
+        url: URL to download from
+        extract_to: Directory to extract the archive to
+        expected_hash: Expected SHA1 hash (None to skip verification)
+        archive_type: Archive type - "zip", "tar.gz", or "auto" to detect from URL
+        
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        # Determine archive type
+        if archive_type == "auto":
+            if url.endswith(".zip"):
+                archive_type = "zip"
+            elif url.endswith(".tar.gz") or url.endswith(".tgz"):
+                archive_type = "tar.gz"
+            else:
+                log.error("Cannot determine archive type from URL: %s", url)
+                return False
+        
+        # Create temp file for download
+        suffix = ".zip" if archive_type == "zip" else ".tar.gz"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+            download_path = tmp_file.name
+        
+        log.info("Downloading archive to temp file: %s", download_path)
+        
+        # Download with progress
+        resp = requests.get(url, stream=True, timeout=120, allow_redirects=True)
+        resp.raise_for_status()
+        
+        sha1 = hashlib.sha1()
+        with open(download_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+                sha1.update(chunk)
+        
+        # Verify hash
+        if expected_hash:
+            actual_hash = sha1.hexdigest()
+            if actual_hash != expected_hash:
+                log.error("Hash mismatch! Expected %s, got %s", expected_hash, actual_hash)
+                os.remove(download_path)
+                return False
+        
+        # Prepare extraction directory
+        os.makedirs(extract_to, exist_ok=True)
+        
+        log.info("Extracting archive to: %s", extract_to)
+        
+        # Extract based on archive type
+        if archive_type == "zip":
+            with zipfile.ZipFile(download_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_to)
+        elif archive_type == "tar.gz":
+            with tarfile.open(download_path, 'r:gz') as tar_ref:
+                tar_ref.extractall(extract_to)
+        else:
+            log.error("Unsupported archive type: %s", archive_type)
+            os.remove(download_path)
+            return False
+        
+        # Clean up temp file
+        os.remove(download_path)
+        
+        # Flatten directory structure: Eclipse Temurin archives have a single nested directory
+        # like jdk8u442-b06 that should be flattened to extract_to root
+        extracted_items = os.listdir(extract_to)
+        if len(extracted_items) == 1 and os.path.isdir(os.path.join(extract_to, extracted_items[0])):
+            nested_dir = os.path.join(extract_to, extracted_items[0])
+            log.info("Flattening extracted directory structure: %s -> %s", extracted_items[0], extract_to)
+            
+            # Move all contents from nested dir to extract_to
+            for item in os.listdir(nested_dir):
+                src = os.path.join(nested_dir, item)
+                dst = os.path.join(extract_to, item)
+                shutil.move(src, dst)
+            
+            # Remove empty nested directory
+            os.rmdir(nested_dir)
+        
+        log.info("Successfully downloaded and extracted to: %s", extract_to)
+        return True
+        
+    except Exception as e:
+        log.error("Download and extract failed: %s", e)
+        # Clean up on failure
+        if 'download_path' in locals() and os.path.exists(download_path):
+            os.remove(download_path)
+        return False
+
 
 def extract_project_id_from_url(url: str) -> str | None:
     """Extract project_id from Modrinth CDN URL.

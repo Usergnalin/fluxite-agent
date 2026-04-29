@@ -269,7 +269,7 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
             
             if not entrypoint:
                 cleanup_server_directory(server_id)
-                return False, f"Modpack installation failed: Could not find server entrypoint"
+                return False, "Modpack installation failed: Could not find server entrypoint"
             
             server_path = os.path.join(SERVERS_BASE_DIR, server_id)
             
@@ -792,6 +792,57 @@ def report_server_deleted(auth: AgentAuth, server_id: str):
         log.error("Failed to report deleted server %s to API: %s", server_id, e)
 
 # ---------------------------------------------------------------------------
+# Required Files Initialization
+# ---------------------------------------------------------------------------
+
+def ensure_required_files() -> bool:
+    """Download required installer files and JDKs on startup if they don't exist.
+    
+    Returns True if all files are present/ downloaded successfully,
+    False if any download failed.
+    """
+    from config import REQUIRED_DOWNLOADS, JDK_VERSIONS, RUNTIMES_DIR, get_jdk_download_config
+    from installer import download_file, download_and_extract
+    
+    log.info("Checking required files...")
+    all_ok = True
+    
+    # Check and download installer files
+    for local_path, (url, expected_hash) in REQUIRED_DOWNLOADS.items():
+        if os.path.exists(local_path):
+            continue
+        
+        log.info("Downloading required file: %s", os.path.basename(local_path))
+        if download_file(url, local_path, expected_hash=expected_hash):
+            pass
+        else:
+            log.error("Failed to download required file: %s", local_path)
+            all_ok = False
+    
+    # Check and download JDKs
+    log.info("Checking required JDKs...")
+    for java_version in JDK_VERSIONS:
+        jdk_path = os.path.join(RUNTIMES_DIR, f"jdk{java_version}")
+        java_executable = os.path.join(jdk_path, "bin", "java" + (".exe" if sys.platform == "win32" else ""))
+        
+        # Check if JDK is already installed
+        if os.path.exists(java_executable):
+            log.debug("JDK %d found at %s", java_version, jdk_path)
+            continue
+        
+        log.info("JDK %d not found, downloading...", java_version)
+        url, expected_hash, archive_type = get_jdk_download_config(java_version)
+        
+        if download_and_extract(url, jdk_path, expected_hash=expected_hash, archive_type=archive_type):
+            log.info("JDK %d downloaded and extracted successfully", java_version)
+        else:
+            log.error("Failed to download/extract JDK %d", java_version)
+            all_ok = False
+    
+    return all_ok
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -808,6 +859,11 @@ def main() -> None:
     log.info("Agent logs writing to %s", agent_log_path)
 
     auth = init_auth()
+    
+    # Download required files if missing
+    if not ensure_required_files():
+        log.error("Failed to download required files. Continuing anyway...")
+    
     registry = ServerRegistry()
     cmd_queue = CommandQueue()
     poller = CommandPoller(auth, cmd_queue)
