@@ -45,6 +45,7 @@ jobs:
       - name: Install WiX Toolset
         run: |
           dotnet tool install --global wix --version 4.0.5
+          wix extension add WixToolset.UI.wixext/4.0.5
 
       - name: Create WiX source file
         shell: pwsh
@@ -54,13 +55,88 @@ jobs:
           $version = $version.TrimStart('v')
           @"
           <?xml version="1.0" encoding="UTF-8"?>
-          <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+          <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+               xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
             <Package Name="MC Manager Agent"
-                    Manufacturer="Your Name"
+                    Manufacturer="Ni Lang"
                     Version="$version.0"
                     UpgradeCode="5f69dbfd-1007-4d54-9bad-f694f42ae568">
 
               <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+              <MediaTemplate EmbedCab="yes" />
+
+              <ui:WixUI Id="WixUI_Minimal" />
+
+              <Property Id="AGENT_NAME" Secure="yes" />
+              <Property Id="LINK_CODE" Secure="yes" />
+
+              <UI>
+                <Dialog Id="LinkingDlg" Width="370" Height="270" Title="Link Your Agent">
+                  <Control Id="Title" Type="Text" X="15" Y="15" Width="340" Height="20"
+                          Text="{\WixUI_Font_Title}Agent Setup" />
+                  <Control Id="Desc" Type="Text" X="25" Y="45" Width="320" Height="30"
+                          Text="Enter your agent name and linking code from the MC Manager dashboard." />
+
+                  <Control Id="AgentNameLabel" Type="Text" X="25" Y="90" Width="150" Height="15"
+                          Text="Agent Name:" />
+                  <Control Id="AgentNameEdit" Type="Edit" X="25" Y="105" Width="320" Height="20"
+                          Property="AGENT_NAME" />
+
+                  <Control Id="LinkCodeLabel" Type="Text" X="25" Y="135" Width="150" Height="15"
+                          Text="Linking Code:" />
+                  <Control Id="LinkCodeEdit" Type="Edit" X="25" Y="150" Width="320" Height="20"
+                          Property="LINK_CODE" />
+
+                  <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17"
+                          Default="yes" Text="Next">
+                    <Publish Event="NewDialog" Value="VerifyReadyDlg" />
+                  </Control>
+                  <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
+                          Text="Back">
+                    <Publish Event="NewDialog" Value="WelcomeDlg" />
+                  </Control>
+                  <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17"
+                          Cancel="yes" Text="Cancel">
+                    <Publish Event="SpawnDialog" Value="CancelDlg" />
+                  </Control>
+                </Dialog>
+
+                <InstallUISequence>
+                  <Show Dialog="LinkingDlg" After="WelcomeDlg">NOT Installed</Show>
+                </InstallUISequence>
+              </UI>
+
+              <!-- write agent name and link code to config file -->
+              <CustomAction Id="WriteConfig"
+                            Execute="deferred"
+                            Impersonate="yes"
+                            ExeCommand="powershell -ExecutionPolicy Bypass -Command &quot;
+                              `$base = &quot;`$env:APPDATA\MCAgent\config&quot;;
+                              New-Item -Force -ItemType Directory `$base | Out-Null;
+                              @{
+                                agent_name = '[AGENT_NAME]';
+                                link_code  = '[LINK_CODE]';
+                                linked     = `$false
+                              } | ConvertTo-Json | Out-File &quot;`$base\agent.json&quot; -Encoding UTF8
+                            &quot;"
+                            Return="check" />
+
+              <!-- firewall rule so java never prompts -->
+              <CustomAction Id="FirewallRule"
+                            Execute="deferred"
+                            Impersonate="no"
+                            ExeCommand="powershell -ExecutionPolicy Bypass -Command &quot;
+                              New-NetFirewallRule -DisplayName 'MC Manager Agent - Java' ``
+                                -Direction Inbound ``
+                                -Program &quot;`$env:APPDATA\MCAgent\runtimes\jdk21\bin\java.exe&quot; ``
+                                -Action Allow -Profile Any | Out-Null
+                            &quot;"
+                            Return="ignore" />
+
+              <InstallExecuteSequence>
+                <Custom Action="WriteConfig" After="InstallFinalize">NOT Installed</Custom>
+                <Custom Action="FirewallRule" After="WriteConfig">NOT Installed</Custom>
+              </InstallExecuteSequence>
 
               <Feature Id="MainFeature" Title="MC Manager Agent" Level="1">
                 <ComponentGroupRef Id="MainComponents" />
@@ -84,7 +160,7 @@ jobs:
 
       - name: Build MSI
         run: |
-          wix build mcagent.wxs -o mcagent.msi
+          wix build mcagent.wxs -o mcagent.msi -arch x64 -ext WixToolset.UI.wixext
 
       - name: Upload MSI as release artifact
         uses: actions/upload-artifact@v4
