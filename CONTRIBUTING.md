@@ -1,0 +1,1 @@
+By contributing to this project, you agree that your contributions will be licensed under the project's Apache 2.0 license and that the maintainers reserve the right to dual-license or include these contributions in commercial versions.

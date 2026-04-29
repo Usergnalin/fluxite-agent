@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# jre runtimes
+runtimes/
+
+# static server installers
+installers/
