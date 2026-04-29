@@ -1,0 +1,97 @@
+name: Build MSI Installer
+
+on:
+  push:
+    tags:
+      - 'v*'          # triggers on v1.0.0, v1.2.3, etc
+  workflow_dispatch:  # lets you trigger manually from GitHub UI
+
+jobs:
+  build-msi:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r src/requirements.txt
+          pip install pyinstaller
+
+      - name: Download JRE from Adoptium
+        shell: pwsh
+        run: |
+          $jreUrl = "https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse"
+          $jreZip = "jre-windows.zip"
+          Invoke-WebRequest -Uri $jreUrl -OutFile $jreZip
+          Expand-Archive -Path $jreZip -DestinationPath "runtimes/jdk21"
+          # flatten one level if Adoptium wraps in a subfolder
+          $inner = Get-ChildItem "runtimes/jdk21" | Select-Object -First 1
+          if ($inner.PSIsContainer) {
+            Get-ChildItem $inner.FullName | Move-Item -Destination "runtimes/jdk21"
+            Remove-Item $inner.FullName
+          }
+
+      - name: Build executable with PyInstaller
+        run: |
+          pyinstaller mcagent.spec
+
+      - name: Install WiX Toolset
+        run: |
+          dotnet tool install --global wix
+
+      - name: Create WiX source file
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          @"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+            <Package Name="MC Manager Agent"
+                     Manufacturer="Your Name"
+                     Version="$version"
+                     UpgradeCode="PUT-A-GUID-HERE">
+
+              <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+
+              <Feature Id="MainFeature" Title="MC Manager Agent" Level="1">
+                <ComponentGroupRef Id="MainComponents" />
+              </Feature>
+
+              <StandardDirectory Id="ProgramFiles6432Folder">
+                <Directory Id="INSTALLFOLDER" Name="MC Manager Agent">
+                  <ComponentGroup Id="MainComponents">
+                    <Component Id="MainExecutable">
+                      <File Source="dist\mcagent.exe" />
+                    </Component>
+                    <Component Id="RuntimesFolder">
+                      <File Source="runtimes\jdk21\bin\java.exe" />
+                    </Component>
+                  </ComponentGroup>
+                </Directory>
+              </StandardDirectory>
+            </Package>
+          </Wix>
+          "@ | Out-File -FilePath "mcagent.wxs" -Encoding UTF8
+
+      - name: Build MSI
+        run: |
+          wix build mcagent.wxs -o mcagent.msi
+
+      - name: Upload MSI as release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcagent-installer
+          path: mcagent.msi
+
+      - name: Attach MSI to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mcagent.msi
