@@ -7,7 +7,6 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[
-        ('installers/', 'installers/'),
         ('src/', 'src/'),
     ],
     hiddenimports=[],
