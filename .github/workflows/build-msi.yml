@@ -46,6 +46,7 @@ jobs:
         run: |
           dotnet tool install --global wix --version 4.0.5
           wix extension add WixToolset.UI.wixext/4.0.5
+          wix extension add WixToolset.Util.wixext/4.0.5
 
       - name: Convert license to RTF
         shell: pwsh
@@ -114,36 +115,26 @@ jobs:
               </UI>
 
               <!-- WriteConfig -->
-              <Property Id="WriteConfigCmd" Value="powershell.exe" />
+              <SetProperty Id="WriteConfig" Sequence="execute" Before="WriteConfig"
+                  Value="powershell.exe -ExecutionPolicy Bypass -NoProfile -Command &quot;$base = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'MCAgent\config'; New-Item -Force -ItemType Directory $base | Out-Null; [pscustomobject]@{ agent_name='[AGENT_NAME]'; link_code='[LINK_CODE]'; linked=$false } | ConvertTo-Json | Set-Content (Join-Path $base 'agent.json') -Encoding UTF8&quot;" />
+
               <CustomAction Id="WriteConfig"
-                            Execute="immediate"
+                            Execute="deferred"
                             Impersonate="yes"
-                            Property="WriteConfigCmd"
-                            ExeCommand="-ExecutionPolicy Bypass -Command &quot;
-                              `$base = &quot;`$env:APPDATA\MCAgent\config&quot;;
-                              New-Item -Force -ItemType Directory `$base | Out-Null;
-                              @{ agent_name = '[AGENT_NAME]'; link_code = '[LINK_CODE]'; linked = `$false } |
-                              ConvertTo-Json | Out-File &quot;`$base\agent.json&quot; -Encoding UTF8
-                            &quot;"
                             Return="check" />
 
               <!-- FirewallRule -->
-              <Property Id="FirewallCmd" Value="powershell.exe" />
+              <SetProperty Id="FirewallRule" Sequence="execute" Before="FirewallRule"
+                  Value="powershell.exe -ExecutionPolicy Bypass -NoProfile -Command &quot;New-NetFirewallRule -DisplayName 'MC Manager Agent - Java' -Direction Inbound -Program (Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'MCAgent\runtimes\jdk21\bin\java.exe') -Action Allow -Profile Any | Out-Null&quot;" />
+
               <CustomAction Id="FirewallRule"
                             Execute="deferred"
                             Impersonate="no"
-                            Property="FirewallCmd"
-                            ExeCommand="-ExecutionPolicy Bypass -Command &quot;
-                              New-NetFirewallRule -DisplayName 'MC Manager Agent - Java' ``
-                                -Direction Inbound ``
-                                -Program &quot;`$env:APPDATA\MCAgent\runtimes\jdk21\bin\java.exe&quot; ``
-                                -Action Allow -Profile Any | Out-Null
-                            &quot;"
                             Return="ignore" />
 
               <InstallExecuteSequence>
-                <Custom Action="WriteConfig" After="InstallFinalize" Condition="NOT Installed" />
-                <Custom Action="FirewallRule" After="WriteConfig" Condition="NOT Installed" />
+                  <Custom Action="WriteConfig" After="InstallFiles" Condition="NOT Installed" />
+                  <Custom Action="FirewallRule" After="WriteConfig" Condition="NOT Installed" />
               </InstallExecuteSequence>
 
               <Feature Id="MainFeature" Title="MC Manager Agent" Level="1">
