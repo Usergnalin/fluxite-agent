@@ -44,7 +44,7 @@ jobs:
 
       - name: Install WiX Toolset
         run: |
-          dotnet tool install --global wix
+          dotnet tool install --global wix --version 4.0.5
 
       - name: Create WiX source file
         shell: pwsh
