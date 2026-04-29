@@ -47,6 +47,13 @@ jobs:
           dotnet tool install --global wix --version 4.0.5
           wix extension add WixToolset.UI.wixext/4.0.5
 
+      - name: Convert license to RTF
+        shell: pwsh
+        run: |
+          $text = Get-Content LICENSE -Raw
+          $rtf = "{\rtf1\ansi\deff0 " + $text.Replace("`n", "\par ") + "}"
+          $rtf | Out-File -FilePath "LICENSE.rtf" -Encoding ASCII
+
       - name: Create WiX source file
         shell: pwsh
         run: |
@@ -64,7 +71,7 @@ jobs:
 
               <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
               <MediaTemplate EmbedCab="yes" />
-
+              <WixVariable Id="WixUILicenseRtf" Value="LICENSE.rtf" />
               <ui:WixUI Id="WixUI_Minimal" />
 
               <Property Id="AGENT_NAME" Secure="yes" />
@@ -109,7 +116,7 @@ jobs:
               <!-- WriteConfig -->
               <Property Id="WriteConfigCmd" Value="powershell.exe" />
               <CustomAction Id="WriteConfig"
-                            Execute="deferred"
+                            Execute="immediate"
                             Impersonate="yes"
                             Property="WriteConfigCmd"
                             ExeCommand="-ExecutionPolicy Bypass -Command &quot;
