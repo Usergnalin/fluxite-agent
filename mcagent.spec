@@ -9,7 +9,27 @@ a = Analysis(
     datas=[
         ('src/', 'src/'),
     ],
-    hiddenimports=[],
+    hiddenimports=[
+        # cffi / PyNaCl
+        '_cffi_backend',
+        'cffi',
+        'cffi._cffi_include',
+        'cffi.recompiler',
+        'pycparser',
+        # nacl bindings
+        'nacl',
+        'nacl.bindings',
+        'nacl.signing',
+        'nacl.encoding',
+        # requests stack
+        'certifi',
+        'charset_normalizer',
+        'charset_normalizer.md__mypyc',
+        'idna',
+        'urllib3',
+        'urllib3.contrib',
+        'urllib3.util',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
