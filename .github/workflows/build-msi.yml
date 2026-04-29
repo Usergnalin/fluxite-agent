@@ -154,7 +154,6 @@ jobs:
               <ComponentGroup Id="MainComponents">
                 <ComponentRef Id="MainExecutable" />
               </ComponentGroup>
-              <MediaTemplate EmbedCab="yes" />
             </Package>
           </Wix>
           "@ | Out-File -FilePath "mcagent.wxs" -Encoding UTF8
