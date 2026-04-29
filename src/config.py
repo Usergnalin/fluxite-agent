@@ -6,6 +6,14 @@ import os
 import sys
 
 API_BASE = os.getenv("MC_API_BASE", "https://gnalin.xyz/api")
+IS_FROZEN = getattr(sys, 'frozen', False)
+
+if IS_FROZEN:
+    # running as installed exe - use APPDATA
+    BASE_DIR = os.path.join(os.environ.get('APPDATA'), 'MCAgent')
+else:
+    # running in dev - use project root
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Agent linking
 LINK_URL = f"{API_BASE}/agent"
@@ -28,7 +36,7 @@ LOG_STREAM_BATCH_INTERVAL = 0.5
 LOG_STREAM_MAX_CHARS = 500
 
 # Agent logging
-AGENT_LOGS_DIR = "./logs"
+AGENT_LOGS_DIR = os.path.join(BASE_DIR, "logs")
 AGENT_LOG_MAX_AGE_DAYS = 30
 AGENT_LOGS_URL = API_BASE + "/agent/logs/{}"
 
@@ -50,7 +58,7 @@ NEOFORGE_INSTALLER_URL = "https://maven.neoforged.net/releases/net/neoforged/neo
 FORGE_INSTALLER_URL = "https://maven.minecraftforge.net/net/minecraftforge/forge/{mc_version}-{loader_version}/forge-{mc_version}-{loader_version}-installer.jar"
 
 # Temporary directory for modpack processing
-TMP_DIR = "./tmp"
+TMP_DIR = os.path.join(BASE_DIR, "tmp")
 
 # Local credential files
 KEY_FILE = "agent.key"
@@ -60,10 +68,10 @@ ID_FILE = "agent_id.txt"
 INSTALLER_TIMEOUT = 300
 
 # MC Server management
-SERVERS_BASE_DIR = "./servers"
-SERVER_REGISTRY_FILE = "servers.json"
-FABRIC_INSTALLER_PATH = "./installers/fabric-installer.jar"
-QUILT_INSTALLER_PATH = "./installers/quilt-installer.jar"
+SERVERS_BASE_DIR = os.path.join(BASE_DIR, "servers")
+SERVER_REGISTRY_FILE = os.path.join(BASE_DIR, "servers.json")
+FABRIC_INSTALLER_PATH = os.path.join(BASE_DIR, "installers", "fabric-installer.jar")
+QUILT_INSTALLER_PATH = os.path.join(BASE_DIR, "installers", "quilt-installer.jar")
 
 # JVM Runtime settings
 JVM_VERSION = "21"
@@ -73,18 +81,13 @@ def _get_java_executable(name: str, java_version: str = JVM_VERSION) -> str:
     Windows uses .exe, Linux/macOS use no extension.
     """
     suffix = ".exe" if sys.platform == "win32" else ""
-    return os.path.abspath(f"./runtimes/jdk{java_version}/bin/{name}{suffix}")
+    return os.path.abspath(os.path.join(BASE_DIR, f"runtimes/jdk{java_version}/bin/{name}{suffix}"))
 
 JVM_PATH = _get_java_executable("java")
-JAVAP_PATH = _get_java_executable("javap")
 
 def get_jvm_path_for_version(java_version: str) -> str:
     """Get the JVM executable path for a specific Java version."""
     return _get_java_executable("java", java_version)
-
-def get_javap_path_for_version(java_version: str) -> str:
-    """Get the javap executable path for a specific Java version."""
-    return _get_java_executable("javap", java_version)
 
 # Module types and folder mapping
 VALID_MODULE_TYPES = ['mod', 'resource_pack', 'data_pack', 'plugin']

@@ -221,3 +221,9 @@ runtimes/
 
 # static server installers
 installers/
+
+# agent data
+agent.key
+agent_id.txt
+servers.json
+servers/

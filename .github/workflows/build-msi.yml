@@ -56,11 +56,40 @@ jobs:
           <?xml version="1.0" encoding="UTF-8"?>
           <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
             <Package Name="MC Manager Agent"
-                    Manufacturer="Your Name"
+                    Manufacturer="Ni Lang"
                     Version="$version.0"
                     UpgradeCode="5f69dbfd-1007-4d54-9bad-f694f42ae568">
-
               <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+              <MediaTemplate EmbedCab="yes" />
+
+              <Property Id="SETUP_SCRIPT" Value="[INSTALLFOLDER]setup.ps1" />
+
+              <CustomAction Id="CreateAppDataDirs"
+                            Execute="deferred"
+                            Impersonate="yes"
+                            ExeCommand="powershell -ExecutionPolicy Bypass -Command &quot;
+                              `$base = &quot;`$env:APPDATA\MCAgent&quot;;
+                              New-Item -Force -ItemType Directory &quot;`$base\servers&quot; | Out-Null;
+                              New-Item -Force -ItemType Directory &quot;`$base\logs&quot; | Out-Null;
+                              New-Item -Force -ItemType Directory &quot;`$base\installers&quot; | Out-Null;
+                              New-Item -Force -ItemType Directory &quot;`$base\runtimes\jdk21&quot; | Out-Null;
+                              `$jreUrl = 'https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse';
+                              Invoke-WebRequest `$jreUrl -OutFile &quot;`$env:TEMP\jre.zip&quot;;
+                              Expand-Archive &quot;`$env:TEMP\jre.zip&quot; &quot;`$env:TEMP\jre_extract&quot; -Force;
+                              `$inner = Get-ChildItem &quot;`$env:TEMP\jre_extract&quot; | Select-Object -First 1;
+                              if (`$inner.PSIsContainer) {
+                                Get-ChildItem `$inner.FullName | Move-Item -Destination &quot;`$base\runtimes\jdk21&quot; -Force
+                              };
+                              `$fabricUrl = 'https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.1/fabric-installer-1.1.1.jar';
+                              Invoke-WebRequest `$fabricUrl -OutFile &quot;`$base\installers\fabric-installer.jar&quot;;
+                              `$quiltUrl = 'https://quiltmc.org/api/v1/download-latest-installer/java-universal';
+                              Invoke-WebRequest `$quiltUrl -OutFile &quot;`$base\installers\quilt-installer.jar&quot;
+                            &quot;"
+                            Return="ignore" />
+
+              <InstallExecuteSequence>
+                <Custom Action="CreateAppDataDirs" After="InstallFinalize">NOT Installed</Custom>
+              </InstallExecuteSequence>
 
               <Feature Id="MainFeature" Title="MC Manager Agent" Level="1">
                 <ComponentGroupRef Id="MainComponents" />
@@ -77,7 +106,7 @@ jobs:
               <ComponentGroup Id="MainComponents">
                 <ComponentRef Id="MainExecutable" />
               </ComponentGroup>
-              <MediaTemplate EmbedCab="yes" />
+
             </Package>
           </Wix>
           "@ | Out-File -FilePath "mcagent.wxs" -Encoding UTF8
