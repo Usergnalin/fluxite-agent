@@ -68,13 +68,15 @@ jobs:
 
               <StandardDirectory Id="ProgramFiles6432Folder">
                 <Directory Id="INSTALLFOLDER" Name="MC Manager Agent">
-                  <ComponentGroup Id="MainComponents">
-                    <Component Id="MainExecutable">
-                      <File Source="dist\mcagent.exe" />
-                    </Component>
-                  </ComponentGroup>
+                  <Component Id="MainExecutable">
+                    <File Source="dist\mcagent.exe" />
+                  </Component>
                 </Directory>
               </StandardDirectory>
+
+              <ComponentGroup Id="MainComponents">
+                <ComponentRef Id="MainExecutable" />
+              </ComponentGroup>
             </Package>
           </Wix>
           "@ | Out-File -FilePath "mcagent.wxs" -Encoding UTF8
