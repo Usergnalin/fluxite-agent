@@ -49,14 +49,16 @@ jobs:
       - name: Create WiX source file
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart('v')
+          $refName = "${{ github.ref_name }}"
+          $version = if ($refName -match '^\d') { $refName } else { "1.0.0" }
+          $version = $version.TrimStart('v')
           @"
           <?xml version="1.0" encoding="UTF-8"?>
           <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
             <Package Name="MC Manager Agent"
-                     Manufacturer="Your Name"
-                     Version="$version"
-                     UpgradeCode="PUT-A-GUID-HERE">
+                    Manufacturer="Your Name"
+                    Version="$version.0"
+                    UpgradeCode="5f69dbfd-1007-4d54-9bad-f694f42ae568">
 
               <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
 
@@ -69,9 +71,6 @@ jobs:
                   <ComponentGroup Id="MainComponents">
                     <Component Id="MainExecutable">
                       <File Source="dist\mcagent.exe" />
-                    </Component>
-                    <Component Id="RuntimesFolder">
-                      <File Source="runtimes\jdk21\bin\java.exe" />
                     </Component>
                   </ComponentGroup>
                 </Directory>
