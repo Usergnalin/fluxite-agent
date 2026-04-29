@@ -24,20 +24,6 @@ jobs:
           pip install -r src/requirements.txt
           pip install pyinstaller
 
-      - name: Download JRE from Adoptium
-        shell: pwsh
-        run: |
-          $jreUrl = "https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse"
-          $jreZip = "jre-windows.zip"
-          Invoke-WebRequest -Uri $jreUrl -OutFile $jreZip
-          Expand-Archive -Path $jreZip -DestinationPath "runtimes/jdk21"
-          # flatten one level if Adoptium wraps in a subfolder
-          $inner = Get-ChildItem "runtimes/jdk21" | Select-Object -First 1
-          if ($inner.PSIsContainer) {
-            Get-ChildItem $inner.FullName | Move-Item -Destination "runtimes/jdk21"
-            Remove-Item $inner.FullName
-          }
-
       - name: Build executable with PyInstaller
         run: |
           pyinstaller mcagent.spec
@@ -46,7 +32,6 @@ jobs:
         run: |
           dotnet tool install --global wix --version 4.0.5
           wix extension add WixToolset.UI.wixext/4.0.5
-          wix extension add WixToolset.Util.wixext/4.0.5
 
       - name: Convert license to RTF
         shell: pwsh
@@ -74,68 +59,6 @@ jobs:
               <MediaTemplate EmbedCab="yes" />
               <WixVariable Id="WixUILicenseRtf" Value="LICENSE.rtf" />
               <ui:WixUI Id="WixUI_Minimal" />
-
-              <Property Id="AGENT_NAME" Secure="yes" />
-              <Property Id="LINK_CODE" Secure="yes" />
-
-              <UI>
-                <Dialog Id="LinkingDlg" Width="370" Height="270" Title="Link Your Agent">
-                  <Control Id="Title" Type="Text" X="15" Y="15" Width="340" Height="20"
-                          Text="{\WixUI_Font_Title}Agent Setup" />
-                  <Control Id="Desc" Type="Text" X="25" Y="45" Width="320" Height="30"
-                          Text="Enter your agent name and linking code from the MC Manager dashboard." />
-
-                  <Control Id="AgentNameLabel" Type="Text" X="25" Y="90" Width="150" Height="15"
-                          Text="Agent Name:" />
-                  <Control Id="AgentNameEdit" Type="Edit" X="25" Y="105" Width="320" Height="20"
-                          Property="AGENT_NAME" />
-
-                  <Control Id="LinkCodeLabel" Type="Text" X="25" Y="135" Width="150" Height="15"
-                          Text="Linking Code:" />
-                  <Control Id="LinkCodeEdit" Type="Edit" X="25" Y="150" Width="320" Height="20"
-                          Property="LINK_CODE" />
-
-                  <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17"
-                          Default="yes" Text="Next">
-                    <Publish Event="NewDialog" Value="VerifyReadyDlg" />
-                  </Control>
-                  <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
-                          Text="Back">
-                    <Publish Event="NewDialog" Value="WelcomeDlg" />
-                  </Control>
-                  <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17"
-                          Cancel="yes" Text="Cancel">
-                    <Publish Event="SpawnDialog" Value="CancelDlg" />
-                  </Control>
-                </Dialog>
-
-                <InstallUISequence>
-                  <Show Dialog="LinkingDlg" After="WelcomeDlg" Condition="NOT Installed" />
-                </InstallUISequence>
-              </UI>
-
-              <!-- WriteConfig -->
-              <SetProperty Id="WriteConfig" Sequence="execute" Before="WriteConfig"
-                  Value="powershell.exe -ExecutionPolicy Bypass -NoProfile -Command &quot;$base = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'MCAgent\config'; New-Item -Force -ItemType Directory $base | Out-Null; [pscustomobject]@{ agent_name='[AGENT_NAME]'; link_code='[LINK_CODE]'; linked=$false } | ConvertTo-Json | Set-Content (Join-Path $base 'agent.json') -Encoding UTF8&quot;" />
-
-              <CustomAction Id="WriteConfig"
-                            Execute="deferred"
-                            Impersonate="yes"
-                            Return="check" />
-
-              <!-- FirewallRule -->
-              <SetProperty Id="FirewallRule" Sequence="execute" Before="FirewallRule"
-                  Value="powershell.exe -ExecutionPolicy Bypass -NoProfile -Command &quot;New-NetFirewallRule -DisplayName 'MC Manager Agent - Java' -Direction Inbound -Program (Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'MCAgent\runtimes\jdk21\bin\java.exe') -Action Allow -Profile Any | Out-Null&quot;" />
-
-              <CustomAction Id="FirewallRule"
-                            Execute="deferred"
-                            Impersonate="no"
-                            Return="ignore" />
-
-              <InstallExecuteSequence>
-                  <Custom Action="WriteConfig" After="InstallFiles" Condition="NOT Installed" />
-                  <Custom Action="FirewallRule" After="WriteConfig" Condition="NOT Installed" />
-              </InstallExecuteSequence>
 
               <Feature Id="MainFeature" Title="MC Manager Agent" Level="1">
                 <ComponentGroupRef Id="MainComponents" />

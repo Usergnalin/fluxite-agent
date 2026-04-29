@@ -1,0 +1,77 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+    xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+    xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+<Package Name="MC Manager Agent"
+        Manufacturer="Ni Lang"
+        Version="$version.0"
+        UpgradeCode="5f69dbfd-1007-4d54-9bad-f694f42ae568">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <WixVariable Id="WixUILicenseRtf" Value="LICENSE.rtf" />
+    <ui:WixUI Id="WixUI_Minimal" />
+
+    <Property Id="AGENT_NAME" Secure="yes" />
+    <Property Id="LINK_CODE" Secure="yes" />
+
+    <UI>
+    <Dialog Id="LinkingDlg" Width="370" Height="270" Title="Link Your Agent">
+        <Control Id="Title" Type="Text" X="15" Y="15" Width="340" Height="20"
+                Text="{\WixUI_Font_Title}Agent Setup" />
+        <Control Id="Desc" Type="Text" X="25" Y="45" Width="320" Height="30"
+                Text="Enter your agent name and linking code from the MC Manager dashboard." />
+
+        <Control Id="AgentNameLabel" Type="Text" X="25" Y="90" Width="150" Height="15"
+                Text="Agent Name:" />
+        <Control Id="AgentNameEdit" Type="Edit" X="25" Y="105" Width="320" Height="20"
+                Property="AGENT_NAME" />
+
+        <Control Id="LinkCodeLabel" Type="Text" X="25" Y="135" Width="150" Height="15"
+                Text="Linking Code:" />
+        <Control Id="LinkCodeEdit" Type="Edit" X="25" Y="150" Width="320" Height="20"
+                Property="LINK_CODE" />
+
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17"
+                Default="yes" Text="Next">
+        <Publish Event="NewDialog" Value="VerifyReadyDlg" />
+        </Control>
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17"
+                Text="Back">
+        <Publish Event="NewDialog" Value="WelcomeDlg" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17"
+                Cancel="yes" Text="Cancel">
+        <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+    </Dialog>
+
+    <InstallUISequence>
+        <Show Dialog="LinkingDlg" After="WelcomeDlg" Condition="NOT Installed" />
+    </InstallUISequence>
+    </UI>
+
+    <!-- WriteConfig -->
+    <SetProperty Id="WriteConfig" Sequence="execute" Before="WriteConfig" Value="powershell.exe -ExecutionPolicy Bypass -NoProfile -WindowStyle Hidden -Command &quot;$base = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'MCAgent\config'; New-Item -Force -ItemType Directory $base | Out-Null; [pscustomobject]@{ agent_name='[AGENT_NAME]'; link_code='[LINK_CODE]'; linked=$false } | ConvertTo-Json | Set-Content (Join-Path $base 'agent.json') -Encoding UTF8&quot;" />
+    <CustomAction Id="WriteConfig" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64" Execute="deferred" Impersonate="yes" Return="check" />
+
+    <InstallExecuteSequence>
+        <Custom Action="WriteConfig" After="InstallFiles" Condition="NOT Installed" />
+    </InstallExecuteSequence>
+
+    <Feature Id="MainFeature" Title="MC Manager Agent" Level="1">
+    <ComponentGroupRef Id="MainComponents" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+    <Directory Id="INSTALLFOLDER" Name="MC Manager Agent">
+        <Component Id="MainExecutable" Guid="*">
+        <File Source="dist\mcagent.exe" />
+        </Component>
+    </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="MainComponents">
+    <ComponentRef Id="MainExecutable" />
+    </ComponentGroup>
+</Package>
+</Wix>
