@@ -157,7 +157,8 @@ def get_jdk_download_config(java_version: int) -> tuple[str, str | None, str]:
     return url, expected_hash, ext
 
 # API Endpoints
-CREATE_SERVER_URL = f"{API_BASE}/server"
+CREATE_SERVER_URL = API_BASE + "/server"
+UPDATE_SERVER_THUMBNAIL = API_BASE + "/server/{}/thumbnail/agent"
 SERVER_STATUS_URL_TPL = API_BASE + "/server/{}/status"
 COMMAND_STATUS_URL_TPL = API_BASE + "/command/{}/status"
 COMMAND_FEEDBACK_URL_TPL = API_BASE + "/command/{}/feedback"

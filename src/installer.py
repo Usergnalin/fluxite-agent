@@ -11,6 +11,8 @@ import logging
 import subprocess
 import tempfile
 import shutil
+from PIL import Image
+import io
 from utils import uuid7
 from config import SERVERS_BASE_DIR, REQUEST_TIMEOUT, FABRIC_INSTALLER_PATH, QUILT_INSTALLER_PATH, JVM_PATH, VANILLA_MANIFEST, NEOFORGE_INSTALLER_URL, FORGE_INSTALLER_URL, MODRINTH_USER_AGENT, INSTALLER_TIMEOUT, TMP_DIR
 
@@ -192,90 +194,7 @@ def get_modrinth_project_data(project_id: str, default_icon_url: str) -> dict:
         "server_side": "unknown"
     }
 
-# def setup_server_directory(server_id: str, game_version: str, loader_version: str, loader_type: str, port: int) -> str | None:
-#     """
-#     Set up a new server directory using local fabric-installer.jar.
-#     Returns the name of the jar file on success (fabric-server-launch.jar).
-#     """
-#     server_dir = os.path.join(SERVERS_BASE_DIR, server_id)
-#     os.makedirs(server_dir, exist_ok=True)
-    
-#     # Check if installer exists
-#     if not os.path.exists(FABRIC_INSTALLER_PATH):
-#         log.error("Fabric installer not found at: %s", FABRIC_INSTALLER_PATH)
-#         return None
-    
-#     # Check if JVM exists
-#     if not os.path.exists(JVM_PATH):
-#         log.error("JVM not found at: %s", JVM_PATH)
-#         return None
-    
-#     # Run fabric installer
-#     if loader_type == "fabric":
-#         cmd = [
-#             JVM_PATH, "-jar", os.path.abspath(FABRIC_INSTALLER_PATH), "server",
-#             "-mcversion", game_version,
-#             "-loader", loader_version,
-#             "-downloadMinecraft"
-#         ]
-#     elif loader_type == "quilt":
-#         cmd = [
-#             JVM_PATH, "-jar", os.path.abspath(QUILT_INSTALLER_PATH), "install server",
-#             game_version, loader_version,
-#             "--install-dir=.",
-#             "--download-server"
-#         ]
-    
-#     log.info("Running installer: %s", " ".join(cmd))
-    
-#     try:
-#         result = subprocess.run(
-#             cmd,
-#             cwd=server_dir,
-#             capture_output=True,
-#             text=True,
-#             timeout=300  # 5 minutes timeout
-#         )
-        
-#         if result.returncode != 0:
-#             log.error("Fabric installer failed with return code %d", result.returncode)
-#             log.error("STDOUT: %s", result.stdout)
-#             log.error("STDERR: %s", result.stderr)
-#             return None
-        
-#         log.info("Fabric installer completed successfully")
-#         log.info("STDOUT: %s", result.stdout)
-        
-#         if loader_type == "fabric":
-#             jar_name = "fabric-server-launch.jar"
-#         elif loader_type == "quilt":
-#             jar_name = "quilt-server-launch.jar"
-
-#         print(os.path.abspath(server_dir), os.listdir(server_dir))
-        
-#         if not os.path.exists(os.path.join(server_dir, jar_name)):
-#             log.error("Expected jar file not found after installation: %s", jar_name)
-#             return None
-        
-#         # Accept EULA automatically
-#         with open(os.path.join(server_dir, "eula.txt"), "w") as f:
-#             f.write("eula=true\n")
-        
-#         # Initial server.properties with the port
-#         with open(os.path.join(server_dir, "server.properties"), "w") as f:
-#             f.write(f"server-port={port}\n")
-#             f.write(f"query.port={port}\n")
-        
-#         return jar_name
-        
-#     except subprocess.TimeoutExpired:
-#         log.error("Fabric installer timed out")
-#         return None
-#     except Exception as e:
-#         log.error("Failed to run Fabric installer: %s", e)
-#         return None
-
-def setup_server_directory(server_id: str, game_version: str, loader_version: str, loader_type: str, port: int) -> tuple[str, str] | None:
+def setup_server_directory(server_id: str, game_version: str, loader_version: str, loader_type: str, port: int, motd: str, server_thumnbnail: str) -> tuple[str, str] | None:
     """
     Set up a new server directory using local fabric-installer.jar.
     Returns the name of the jar file on success (fabric-server-launch.jar).
@@ -410,7 +329,11 @@ def setup_server_directory(server_id: str, game_version: str, loader_version: st
         with open(os.path.join(server_dir, "server.properties"), "w") as f:
             f.write(f"server-port={port}\n")
             f.write(f"query.port={port}\n")
-
+            f.write(f"motd={motd}\n")
+        
+        # Set server icon
+        set_server_icon(server_dir, server_thumnbnail)
+        
         java_version = get_java_version(game_version)
 
         return entrypoint, java_version
@@ -485,3 +408,57 @@ def remove_pause_from_bat(file_path, output_path=None):
         print("Successfully removed 'pause' from the end of the file.")
     else:
         print("No 'pause' command found at the end of the file.")
+
+def set_server_icon(server_dir: str, server_thumbnail: str) -> bool:
+    """
+    Downloads, validates, and converts an image to a valid 64x64 PNG server icon.
+    Returns True if successful, False otherwise.
+    """
+    if not server_thumbnail:
+        return False
+
+    try:
+        response = requests.get(server_thumbnail, timeout=10)
+        response.raise_for_status()
+        raw = response.content
+    except requests.RequestException as e:
+        log.error("Failed to download server icon from %s: %s", server_thumbnail, e)
+        return False
+
+    try:
+        img = Image.open(io.BytesIO(raw))
+        original_format = img.format
+        original_size = img.size
+
+        # Convert to RGBA first to handle formats like JPEG that don't support transparency
+        img = img.convert("RGBA")
+
+        if original_format != "PNG":
+            log.warning(
+                "Server icon was %s, not PNG — converting automatically",
+                original_format or "unknown format"
+            )
+
+        if original_size != (64, 64):
+            log.warning(
+                "Server icon was %dx%d, expected 64x64 — resizing with LANCZOS",
+                original_size[0], original_size[1]
+            )
+            img = img.resize((64, 64), Image.LANCZOS)
+
+        # Write as valid PNG
+        out = io.BytesIO()
+        img.save(out, format="PNG")
+        out.seek(0)
+
+        icon_path = os.path.join(server_dir, "server-icon.png")
+        with open(icon_path, "wb") as f:
+            f.write(out.read())
+
+        log.info("Server icon saved successfully (%s, %dx%d → 64x64 PNG)", 
+                 original_format, original_size[0], original_size[1])
+        return True
+
+    except Exception as e:
+        log.error("Failed to process server icon (invalid or corrupt image): %s", e)
+        return False

@@ -18,6 +18,7 @@ class ServerMetadata:
     modules: list[dict[str, Any]] = field(default_factory=list)
     modpack: bool = False
     modpack_source: str = None
+    server_thumbnail: str = None
 
 class ServerRegistry:
     """

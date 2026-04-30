@@ -21,7 +21,7 @@ from poller import CommandPoller
 from server_manager import MCServerManager
 from models import ServerRegistry, ServerMetadata
 from installer import setup_server_directory, parse_server_properties
-from config import SERVERS_BASE_DIR, CREATE_SERVER_URL, REQUEST_TIMEOUT
+from config import SERVERS_BASE_DIR, CREATE_SERVER_URL, UPDATE_SERVER_THUMBNAIL, REQUEST_TIMEOUT
 from agent_log_manager import AgentLogManager, rotate_agent_logs, create_agent_file_handler
 from utils import uuid7
 
@@ -68,9 +68,12 @@ def register_server_with_api(auth: AgentAuth, meta: ServerMetadata):
     }
     try:
         headers = auth.auth_header()
-        resp = requests.post(CREATE_SERVER_URL, json=payload, headers=headers, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
+        create_server_resp = requests.post(CREATE_SERVER_URL, json=payload, headers=headers, timeout=REQUEST_TIMEOUT)
+        create_server_resp.raise_for_status()
         log.info("Server %s successfully registered with API", meta.id)
+        update_server_thumbnail_resp = requests.put(UPDATE_SERVER_THUMBNAIL.format(meta.id), json={"server_thumbnail": meta.server_thumbnail}, headers=headers, timeout=REQUEST_TIMEOUT)
+        update_server_thumbnail_resp.raise_for_status()
+        log.info("Server %s thumbnail updated", meta.id)
     except Exception as e:
         log.error("Failed to register server %s with API: %s", meta.id, e)
 
@@ -134,6 +137,7 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
         server_name = cmd.payload.get("name")
         mc_version = cmd.payload.get("mc_version")
         loader_type = cmd.payload.get("loader_type")
+        thumbnail_url = cmd.payload.get("server_thumbnail")
         if loader_type != "vanilla":
             loader_version = cmd.payload.get("loader_version")
             if not server_name or not mc_version or not loader_version or not loader_type:
@@ -152,7 +156,7 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
         log.info("Installing server %s (%s) on port %d...", server_name, server_id, port)
         try:
             entrypoint, java_version = setup_server_directory(
-                server_id, mc_version, loader_version, loader_type,  port
+                server_id, mc_version, loader_version, loader_type, port, server_name, thumbnail_url
             )
             
             if not entrypoint:
@@ -181,6 +185,7 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
             port=port,
             path=server_path,
             entrypoint=entrypoint,
+            server_thumbnail=thumbnail_url,
             java_version=java_version,
             properties=properties
         )
@@ -264,7 +269,7 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
         try:
             # Install Server with loader
             entrypoint, java_version = setup_server_directory(
-                server_id, mc_version, loader_version, loader_type, port
+                server_id, mc_version, loader_version, loader_type, port, modpack_name, thumbnail_url
             )
             
             if not entrypoint:
@@ -303,6 +308,7 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
                 port=port,
                 path=server_path,
                 entrypoint=entrypoint,
+                server_thumbnail=None,
                 java_version=java_version,
                 properties=properties,
                 modules=modules_metadata,

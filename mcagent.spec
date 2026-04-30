@@ -29,6 +29,7 @@ a = Analysis(
         'urllib3',
         'urllib3.contrib',
         'urllib3.util',
+        'PIL', 'PIL.Image', 'PIL.PngImagePlugin', 'PIL.JpegImagePlugin'
     ],
     hookspath=[],
     hooksconfig={},
