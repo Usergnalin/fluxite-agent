@@ -50,8 +50,8 @@ jobs:
           <?xml version="1.0" encoding="UTF-8"?>
           <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
                xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-            <Package Name="Crafted Console Agent"
-                    Manufacturer="Crafted Console"
+            <Package Name="Fluxite Agent"
+                    Manufacturer="Fluxite"
                     Version="$version.0"
                     UpgradeCode="5f69dbfd-1007-4d54-9bad-f694f42ae568">
 
@@ -60,12 +60,12 @@ jobs:
               <WixVariable Id="WixUILicenseRtf" Value="LICENSE.rtf" />
               <ui:WixUI Id="WixUI_Minimal" />
 
-              <Feature Id="MainFeature" Title="Crafted Console Agent" Level="1">
+              <Feature Id="MainFeature" Title="Fluxite Agent" Level="1">
                 <ComponentGroupRef Id="MainComponents" />
               </Feature>
 
               <StandardDirectory Id="ProgramFiles6432Folder">
-                <Directory Id="INSTALLFOLDER" Name="Crafted Console Agent">
+                <Directory Id="INSTALLFOLDER" Name="Fluxite Agent">
                   <Component Id="MainExecutable" Guid="*">
                     <File Source="dist\mcagent.exe" />
                   </Component>

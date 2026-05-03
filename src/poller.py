@@ -2,6 +2,7 @@
 Background command poller — periodically fetches commands from the API.
 """
 
+import random
 import threading
 import logging
 import time
@@ -28,7 +29,7 @@ class CommandPoller:
         self._queue = cmd_queue
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self._reconnect_delay = 5.0  # seconds
+        self._reconnect_delay = 20.0  # seconds
 
     # ---- control -----------------------------------------------------------
 
@@ -72,7 +73,7 @@ class CommandPoller:
 
             if not self._stop_event.is_set() and not retry_immediately:
                 log.info("API downtime detection — waiting %.1fs before retry", self._reconnect_delay)
-                self._stop_event.wait(timeout=self._reconnect_delay)
+                self._stop_event.wait(timeout=self._reconnect_delay + random.random() * 5)
 
     def _full_poll(self) -> bool:
         """

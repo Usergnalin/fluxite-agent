@@ -5,7 +5,7 @@ Agent configuration — API endpoints, file paths, and defaults.
 import os
 import sys
 
-API_BASE = os.getenv("API_BASE", "https://api.craftedconsole.app")
+API_BASE = os.getenv("API_BASE", "https://api.fluxite.io")
 IS_FROZEN = getattr(sys, 'frozen', False)
 
 if IS_FROZEN:
