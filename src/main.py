@@ -813,13 +813,13 @@ def ensure_required_files() -> bool:
     log.info("Checking required files...")
     all_ok = True
     
-    # Check and download installer files
-    for local_path, (url, expected_hash) in REQUIRED_DOWNLOADS.items():
+    # Check and download installer files (hashes fetched dynamically)
+    for local_path, (url,) in REQUIRED_DOWNLOADS.items():
         if os.path.exists(local_path):
             continue
         
         log.info("Downloading required file: %s", os.path.basename(local_path))
-        if download_file(url, local_path, expected_hash=expected_hash):
+        if download_file(url, local_path):
             pass
         else:
             log.error("Failed to download required file: %s", local_path)

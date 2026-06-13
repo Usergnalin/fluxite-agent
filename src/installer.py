@@ -2,6 +2,10 @@
 Handles downloading, hashing, and initial setup of Minecraft server instances.
 """
 
+
+
+
+
 import os
 import hashlib
 import zipfile
@@ -11,6 +15,7 @@ import logging
 import subprocess
 import tempfile
 import shutil
+import re
 from PIL import Image
 import io
 from utils import uuid7
@@ -18,27 +23,99 @@ from config import SERVERS_BASE_DIR, REQUEST_TIMEOUT, FABRIC_INSTALLER_PATH, QUI
 
 log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Dynamic hash fetching
+# ---------------------------------------------------------------------------
+
+def fetch_expected_hash(url: str, headers: dict = None) -> str | None:
+    """Fetch the expected hash for a download URL from its provider.
+    
+    Detects the hash source based on the URL pattern:
+    - Maven artifacts: fetches {url}.sha1
+    - GitHub releases: fetches {url}.sha256.txt
+    - Other: returns None (hash checking skipped)
+    
+    Returns:
+        The hex-encoded hash string, or None if unavailable.
+    """
+    try:
+        # GitHub release artifacts provide SHA256 checksum files
+        if "github.com/" in url and "/releases/download/" in url:
+            hash_url = url + ".sha256.txt"
+            log.debug("Fetching hash from %s", hash_url)
+            resp = requests.get(hash_url, timeout=30, headers=headers)
+            resp.raise_for_status()
+            # Format: "<sha256_hash> <filename>" — extract the first token
+            match = re.match(r'^([a-fA-F0-9]{64})\s', resp.text.strip())
+            if match:
+                return match.group(1).lower()
+            # Fallback: try treating the whole text as just the hash
+            first_line = resp.text.strip().split('\n')[0].strip()
+            if re.match(r'^[a-fA-F0-9]{64}$', first_line):
+                return first_line.lower()
+            log.warning("Could not parse hash from %s: %s", hash_url, resp.text[:200])
+            return None
+        
+        # Maven repositories provide SHA1 checksum files
+        if "maven." in url or "/maven/" in url:
+            hash_url = url + ".sha1"
+            log.debug("Fetching hash from %s", hash_url)
+            resp = requests.get(hash_url, timeout=30, headers=headers)
+            resp.raise_for_status()
+            # Maven .sha1 files are just the hex hash (40 chars)
+            hash_text = resp.text.strip()
+            if re.match(r'^[a-fA-F0-9]{40}$', hash_text):
+                return hash_text.lower()
+            log.warning("Unexpected SHA1 format from %s: %s", hash_url, hash_text[:200])
+            return None
+        
+        log.debug("No hash provider detected for URL: %s", url)
+        return None
+    except Exception as e:
+        log.warning("Failed to fetch hash for %s: %s — skipping hash verification", url, e)
+        return None
+
+
 def download_file(url: str, dest_path: str, expected_hash: str = None, headers: dict = None) -> bool:
-    """Download a file and optionally verify its SHA1 hash."""
+    """Download a file and optionally verify its hash.
+    
+    If expected_hash is None, the hash will be fetched dynamically from the
+    provider (Maven .sha1 or GitHub .sha256.txt).
+    """
     try:
         log.info("Downloading %s to %s", url, dest_path)
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         
+        # Hash algorithm detection: SHA-1 (40 chars) vs SHA-256 (64 chars)
+        # Default to SHA-1 for backward compatibility; SHA-256 for GitHub.
+        if "github.com/" in url and "/releases/download/" in url:
+            hash_algo = "sha256"
+        else:
+            hash_algo = "sha1"
+        
         resp = requests.get(url, stream=True, timeout=60, headers=headers)
         resp.raise_for_status()
         
-        sha1 = hashlib.sha1()
+        algo = hashlib.sha256() if hash_algo == "sha256" else hashlib.sha1()
         with open(dest_path, "wb") as f:
             for chunk in resp.iter_content(chunk_size=8192):
                 f.write(chunk)
-                sha1.update(chunk)
+                algo.update(chunk)
         
-        if expected_hash:
-            actual_hash = sha1.hexdigest()
-            if actual_hash != expected_hash:
-                log.error("Hash mismatch! Expected %s, got %s", expected_hash, actual_hash)
+        # Resolve hash: use provided, or fetch dynamically
+        verify_hash = expected_hash
+        if verify_hash is None:
+            verify_hash = fetch_expected_hash(url, headers)
+        
+        if verify_hash:
+            actual_hash = algo.hexdigest()
+            if actual_hash != verify_hash:
+                log.error("Hash mismatch! Expected %s, got %s", verify_hash, actual_hash)
                 os.remove(dest_path)
                 return False
+            log.debug("Hash verified: %s", verify_hash)
+        else:
+            log.info("No hash available — skipping verification for %s", url)
         
         return True
     except Exception as e:
@@ -52,7 +129,7 @@ def download_and_extract(url: str, extract_to: str, expected_hash: str = None, a
     Args:
         url: URL to download from
         extract_to: Directory to extract the archive to
-        expected_hash: Expected SHA1 hash (None to skip verification)
+        expected_hash: Expected hash (None to fetch dynamically — SHA256 for GitHub, SHA1 for Maven).
         archive_type: Archive type - "zip", "tar.gz", or "auto" to detect from URL
         
     Returns:
@@ -76,23 +153,34 @@ def download_and_extract(url: str, extract_to: str, expected_hash: str = None, a
         
         log.info("Downloading archive to temp file: %s", download_path)
         
-        # Download with progress
+        # Download with hash computation
+        # Use SHA-256 for GitHub releases, SHA-1 for everything else
+        use_sha256 = "github.com/" in url and "/releases/download/" in url
+        algo = hashlib.sha256() if use_sha256 else hashlib.sha1()
+        
         resp = requests.get(url, stream=True, timeout=120, allow_redirects=True)
         resp.raise_for_status()
         
-        sha1 = hashlib.sha1()
         with open(download_path, "wb") as f:
             for chunk in resp.iter_content(chunk_size=8192):
                 f.write(chunk)
-                sha1.update(chunk)
+                algo.update(chunk)
+        
+        # Resolve hash: use provided, or fetch dynamically
+        verify_hash = expected_hash
+        if verify_hash is None:
+            verify_hash = fetch_expected_hash(url)
         
         # Verify hash
-        if expected_hash:
-            actual_hash = sha1.hexdigest()
-            if actual_hash != expected_hash:
-                log.error("Hash mismatch! Expected %s, got %s", expected_hash, actual_hash)
+        if verify_hash:
+            actual_hash = algo.hexdigest()
+            if actual_hash != verify_hash:
+                log.error("Hash mismatch! Expected %s, got %s", verify_hash, actual_hash)
                 os.remove(download_path)
                 return False
+            log.debug("Hash verified: %s", verify_hash)
+        else:
+            log.info("No hash available — skipping verification for %s", url)
         
         # Prepare extraction directory
         os.makedirs(extract_to, exist_ok=True)
