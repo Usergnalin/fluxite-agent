@@ -8,9 +8,11 @@ import uuid
 import base64
 import requests
 from nacl.signing import SigningKey
+from nacl.public import PrivateKey
 
 from config import (
     LINK_URL, REFRESH_URL_TPL, KEY_FILE, ID_FILE,
+    WIREGUARD_KEY_FILE, WIREGUARD_CONF_PATH,
     TOKEN_REFRESH_INTERVAL, REQUEST_TIMEOUT,
 )
 
@@ -48,35 +50,79 @@ def save_credentials(signing_key: SigningKey, agent_id: str):
 # Agent linking
 # ---------------------------------------------------------------------------
 
-def link_agent(name: str, code: str) -> str:
+def link_agent(name: str, code: str) -> tuple[str, dict]:
     """
     Register a new agent with the cloud panel.
 
-    Generates an Ed25519 keypair, sends the public key + linking code,
-    and persists the credentials on success.
+    Generates Ed25519 and WireGuard keypairs, sends the public keys +
+    linking code, and persists all credentials on success.
 
-    Returns the agent_id.
+    Returns (agent_id, tunnel_config) where tunnel_config is:
+        {server_wg_pubkey, assigned_ip, server_wg_ip, tunnel_endpoint}
     Raises RuntimeError on failure.
     """
     signing_key = SigningKey.generate()
     pub_b64 = base64.b64encode(signing_key.verify_key.encode()).decode("utf-8")
 
+    # Generate WireGuard Curve25519 keypair
+    wg_private = PrivateKey.generate()
+    wg_public = wg_private.public_key
+    wg_priv_b64 = base64.b64encode(wg_private.encode()).decode("utf-8")
+    wg_pub_b64 = base64.b64encode(wg_public.encode()).decode("utf-8")
+
     payload = {
         "agent_name": name,
         "linking_code": code,
         "public_key": pub_b64,
+        "tunnel_public_key": wg_pub_b64,
     }
 
     resp = requests.post(LINK_URL, json=payload, timeout=REQUEST_TIMEOUT)
     if resp.status_code != 200:
         raise RuntimeError(f"Linking failed ({resp.status_code}): {resp.text}")
 
-    agent_id = resp.json().get("agent_id")
+    data = resp.json()
+    agent_id = data.get("agent_id")
     if not agent_id:
         raise RuntimeError("Server returned 200 but no agent_id in response")
 
+    # Extract tunnel config from response
+    server_wg_pubkey = "EQD0zD1Zb8McBqkVntAU/vQsSXIkOZHNLFNivKryulU="
+    assigned_ip = data.get("tunnel_ip")
+    server_wg_ip = "172.16.0.1"
+    tunnel_endpoint = "209.38.57.183"
+
+    if not all([server_wg_pubkey, assigned_ip, server_wg_ip, tunnel_endpoint]):
+        raise RuntimeError("Server response missing WireGuard tunnel configuration")
+
+    tunnel_config = {
+        "server_wg_pubkey": server_wg_pubkey,
+        "assigned_ip": assigned_ip,
+        "server_wg_ip": server_wg_ip,
+        "tunnel_endpoint": tunnel_endpoint,
+    }
+
     save_credentials(signing_key, agent_id)
-    return agent_id
+
+    # Save WireGuard private key
+    with open(WIREGUARD_KEY_FILE, "w") as f:
+        f.write(wg_priv_b64)
+
+    # Write WireGuard conf file
+    conf_content = (
+        "[Interface]\n"
+        f"PrivateKey = {wg_priv_b64}\n"
+        f"Address = {assigned_ip}/32\n"
+        "[Peer]\n"
+        f"PublicKey = {server_wg_pubkey}\n"
+        f"Endpoint = {tunnel_endpoint}:51820\n"
+        f"AllowedIPs = {server_wg_ip}/32\n"
+        "PersistentKeepalive = 25\n"
+    )
+    with open(WIREGUARD_CONF_PATH, "w") as f:
+        f.write(conf_content)
+
+    return agent_id, tunnel_config
 
 
 # ---------------------------------------------------------------------------

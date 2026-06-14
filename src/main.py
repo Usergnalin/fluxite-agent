@@ -12,6 +12,8 @@ import logging
 import queue
 import sys
 import os
+import ctypes
+import subprocess
 import requests
 import shutil
 
@@ -48,8 +50,47 @@ def init_auth() -> AgentAuth:
         if not name or not code:
             log.error("Agent name and linking code are required")
             sys.exit(1)
-        agent_id = link_agent(name, code)
+        if not os.path.exists("C:/Program Files/WireGuard/wireguard.exe"):
+            log.error("WireGuard not installed")
+            sys.exit(1)
+
+        agent_id, tunnel_config = link_agent(name, code)
         signing_key = load_signing_key()
+
+        # Register WireGuard tunnel with the Windows service
+        from config import WIREGUARD_CONF_PATH
+        try:
+            subprocess.run(
+                [
+                    "powershell",
+                    "-Command",
+                    f'Start-Process -FilePath "C:/Program Files/WireGuard/wireguard.exe" -ArgumentList "/uninstalltunnelservice", "wgfluxite" -Verb RunAs -Wait'
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False  # Don't raise error if tunnel doesn't exist
+            )
+
+            # Install the new tunnel
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-Command",
+                    f'Start-Process -FilePath "C:/Program Files/WireGuard/wireguard.exe" -ArgumentList "/installtunnelservice", "{WIREGUARD_CONF_PATH}" -Verb RunAs -Wait'
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                log.info("WireGuard tunnel installed via wireguard.exe")
+            else:
+                log.warning("wireguard.exe returned %d: %s", result.returncode, result.stderr.strip())
+        except FileNotFoundError:
+            log.warning("wireguard.exe not found — tunnel not installed")
+        except Exception as e:
+            log.warning("Failed to install WireGuard tunnel: %s", e)
 
     auth = AgentAuth(signing_key, agent_id)
     auth.ensure_token()

@@ -5,7 +5,7 @@ Agent configuration — API endpoints, file paths, and defaults.
 import os
 import sys
 
-API_BASE = os.getenv("API_BASE", "https://api.fluxite.io")
+API_BASE = os.getenv("API_BASE", "https://api.gnalin.xyz")
 IS_FROZEN = getattr(sys, 'frozen', False)
 
 if IS_FROZEN:
@@ -68,6 +68,8 @@ TMP_DIR = os.path.join(BASE_DIR, "tmp")
 # Local credential files
 KEY_FILE = os.path.join(BASE_DIR, "agent.key")
 ID_FILE = os.path.join(BASE_DIR, "agent_id.txt")
+WIREGUARD_KEY_FILE = os.path.join(BASE_DIR, "agent_wg.key")
+WIREGUARD_CONF_PATH = os.path.join(BASE_DIR, "wgfluxite.conf")
 
 # Timouts
 INSTALLER_TIMEOUT = 300
