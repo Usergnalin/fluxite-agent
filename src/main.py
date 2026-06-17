@@ -16,7 +16,7 @@ import subprocess
 import requests
 import shutil
 
-from auth import AgentAuth, link_agent, load_signing_key, load_agent_id
+from auth import AgentAuth, link_agent, load_signing_key, load_agent_id, load_init_config
 from commands import CommandQueue, CommandType
 from poller import CommandPoller
 from server_manager import MCServerManager
@@ -39,13 +39,19 @@ log = logging.getLogger("agent")
 
 def init_auth() -> AgentAuth:
     """Load saved credentials or run the interactive linking flow."""
+    init_config = load_init_config()
     signing_key = load_signing_key()
     agent_id = load_agent_id()
 
     if not (signing_key and agent_id):
         log.info("No saved credentials found — starting linking flow")
-        name = input("Agent name: ").strip()
-        code = input("Linking code: ").strip()
+        log.info(init_config)
+        if init_config["linking_code"]:
+            code = init_config["linking_code"]
+            name = init_config["agent_name"] if init_config["agent_name"] else os.environ.get('COMPUTERNAME')
+        else:
+            name = input("Agent name: ").strip()
+            code = input("Linking code: ").strip()
         if not name or not code:
             log.error("Agent name and linking code are required")
             sys.exit(1)

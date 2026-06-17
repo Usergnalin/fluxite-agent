@@ -68,6 +68,7 @@ TMP_DIR = os.path.join(BASE_DIR, "tmp")
 # Local credential files
 KEY_FILE = os.path.join(BASE_DIR, "agent.key")
 ID_FILE = os.path.join(BASE_DIR, "agent_id.txt")
+INIT_CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 
 # Timeouts
 INSTALLER_TIMEOUT = 300
