@@ -50,17 +50,17 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='mcagent',
+    name='fluxite-agent',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,       # headless agent, keep console visible
+    console=True,
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,          # add an .ico file path here if you have one
+    icon=None,
 )
