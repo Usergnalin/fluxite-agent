@@ -9,8 +9,8 @@ API_BASE = os.getenv("API_BASE", "https://api.gnalin.xyz")
 IS_FROZEN = getattr(sys, 'frozen', False)
 
 if IS_FROZEN:
-    # running as installed exe - use APPDATA
-    BASE_DIR = os.path.join(os.environ.get('APPDATA'), 'MCAgent')
+    # running as installed exe - use PROGRAMDATA
+    BASE_DIR = os.path.join(os.environ.get('PROGRAMDATA', 'C:\\ProgramData'), 'FluxiteAgent')
 else:
     # running in dev - use project root
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
