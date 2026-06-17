@@ -2,11 +2,8 @@
 Handles downloading, hashing, and initial setup of Minecraft server instances.
 """
 
-
-
-
-
 import os
+import sys
 import hashlib
 import zipfile
 import tarfile

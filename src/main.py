@@ -12,7 +12,6 @@ import logging
 import queue
 import sys
 import os
-import ctypes
 import subprocess
 import requests
 import shutil
@@ -23,7 +22,7 @@ from poller import CommandPoller
 from server_manager import MCServerManager
 from models import ServerRegistry, ServerMetadata
 from installer import setup_server_directory, parse_server_properties
-from config import SERVERS_BASE_DIR, CREATE_SERVER_URL, UPDATE_SERVER_THUMBNAIL, REQUEST_TIMEOUT
+from config import SERVERS_BASE_DIR, CREATE_SERVER_URL, UPDATE_SERVER_THUMBNAIL, REQUEST_TIMEOUT, TMP_DIR
 from agent_log_manager import AgentLogManager, rotate_agent_logs, create_agent_file_handler
 from utils import uuid7
 
@@ -55,10 +54,26 @@ def init_auth() -> AgentAuth:
             sys.exit(1)
 
         agent_id, tunnel_config = link_agent(name, code)
+        # Write WireGuard conf file
+        conf_content = (
+            "[Interface]\n"
+            f"PrivateKey = {tunnel_config['wg_priv_b64']}\n"
+            f"Address = {tunnel_config['assigned_ip']}/32\n"
+            "[Peer]\n"
+            f"PublicKey = {tunnel_config['server_wg_pubkey']}\n"
+            f"Endpoint = {tunnel_config['tunnel_endpoint']}:51820\n"
+            f"AllowedIPs = {tunnel_config['server_wg_ip']}/32\n"
+            "PersistentKeepalive = 25\n"
+        )
+        wireguard_conf_path = os.path.join(TMP_DIR, "wgfluxite.conf")
+        if not os.path.exists(TMP_DIR):
+            os.makedirs(TMP_DIR, exist_ok=True)
+        with open(wireguard_conf_path, "w") as f:
+            f.write(conf_content)
+
         signing_key = load_signing_key()
 
-        # Register WireGuard tunnel with the Windows service
-        from config import WIREGUARD_CONF_PATH
+        # Register WireGuard tunnel with the Windows service (requires admin privileges)
         try:
             subprocess.run(
                 [
@@ -77,7 +92,7 @@ def init_auth() -> AgentAuth:
                 [
                     "powershell",
                     "-Command",
-                    f'Start-Process -FilePath "C:/Program Files/WireGuard/wireguard.exe" -ArgumentList "/installtunnelservice", "{WIREGUARD_CONF_PATH}" -Verb RunAs -Wait'
+                    f'Start-Process -FilePath "C:/Program Files/WireGuard/wireguard.exe" -ArgumentList "/installtunnelservice", "{wireguard_conf_path}" -Verb RunAs -Wait'
                 ],
                 capture_output=True,
                 text=True,
@@ -92,6 +107,8 @@ def init_auth() -> AgentAuth:
         except Exception as e:
             log.warning("Failed to install WireGuard tunnel: %s", e)
 
+        os.remove(wireguard_conf_path)
+
     auth = AgentAuth(signing_key, agent_id)
     auth.ensure_token()
     return auth
@@ -105,6 +122,7 @@ def register_server_with_api(auth: AgentAuth, meta: ServerMetadata):
     payload = {
         "server_id": meta.id,
         "server_name": meta.name,
+        "server_port": meta.port,
         "properties": meta.properties
     }
     try:

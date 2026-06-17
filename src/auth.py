@@ -12,10 +12,8 @@ from nacl.public import PrivateKey
 
 from config import (
     LINK_URL, REFRESH_URL_TPL, KEY_FILE, ID_FILE,
-    WIREGUARD_KEY_FILE, WIREGUARD_CONF_PATH,
     TOKEN_REFRESH_INTERVAL, REQUEST_TIMEOUT,
 )
-
 
 # ---------------------------------------------------------------------------
 # Low-level helpers
@@ -96,6 +94,7 @@ def link_agent(name: str, code: str) -> tuple[str, dict]:
         raise RuntimeError("Server response missing WireGuard tunnel configuration")
 
     tunnel_config = {
+        "wg_priv_b64": wg_priv_b64,
         "server_wg_pubkey": server_wg_pubkey,
         "assigned_ip": assigned_ip,
         "server_wg_ip": server_wg_ip,
@@ -103,24 +102,6 @@ def link_agent(name: str, code: str) -> tuple[str, dict]:
     }
 
     save_credentials(signing_key, agent_id)
-
-    # Save WireGuard private key
-    with open(WIREGUARD_KEY_FILE, "w") as f:
-        f.write(wg_priv_b64)
-
-    # Write WireGuard conf file
-    conf_content = (
-        "[Interface]\n"
-        f"PrivateKey = {wg_priv_b64}\n"
-        f"Address = {assigned_ip}/32\n"
-        "[Peer]\n"
-        f"PublicKey = {server_wg_pubkey}\n"
-        f"Endpoint = {tunnel_endpoint}:51820\n"
-        f"AllowedIPs = {server_wg_ip}/32\n"
-        "PersistentKeepalive = 25\n"
-    )
-    with open(WIREGUARD_CONF_PATH, "w") as f:
-        f.write(conf_content)
 
     return agent_id, tunnel_config
 

@@ -1,13 +1,13 @@
-name: Build MSI Installer
+name: Build Executable
 
 on:
   push:
     tags:
-      - 'v*'          # triggers on v1.0.0, v1.2.3, etc
-  workflow_dispatch:  # lets you trigger manually from GitHub UI
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
-  build-msi:
+  build-exe:
     runs-on: windows-latest
 
     steps:
@@ -26,71 +26,16 @@ jobs:
 
       - name: Build executable with PyInstaller
         run: |
-          pyinstaller mcagent.spec
+          pyinstaller .spec
 
-      - name: Install WiX Toolset
-        run: |
-          dotnet tool install --global wix --version 4.0.5
-          wix extension add WixToolset.UI.wixext/4.0.5
-
-      - name: Convert license to RTF
-        shell: pwsh
-        run: |
-          $text = Get-Content LICENSE -Raw
-          $rtf = "{\rtf1\ansi\deff0 " + $text.Replace("`n", "\par ") + "}"
-          $rtf | Out-File -FilePath "LICENSE.rtf" -Encoding ASCII
-
-      - name: Create WiX source file
-        shell: pwsh
-        run: |
-          $refName = "${{ github.ref_name }}"
-          $version = if ($refName -match '^\d') { $refName } else { "1.0.0" }
-          $version = $version.TrimStart('v')
-          @"
-          <?xml version="1.0" encoding="UTF-8"?>
-          <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-               xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-            <Package Name="Fluxite Agent"
-                    Manufacturer="Fluxite"
-                    Version="$version.0"
-                    UpgradeCode="5f69dbfd-1007-4d54-9bad-f694f42ae568">
-
-              <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
-              <MediaTemplate EmbedCab="yes" />
-              <WixVariable Id="WixUILicenseRtf" Value="LICENSE.rtf" />
-              <ui:WixUI Id="WixUI_Minimal" />
-
-              <Feature Id="MainFeature" Title="Fluxite Agent" Level="1">
-                <ComponentGroupRef Id="MainComponents" />
-              </Feature>
-
-              <StandardDirectory Id="ProgramFiles6432Folder">
-                <Directory Id="INSTALLFOLDER" Name="Fluxite Agent">
-                  <Component Id="MainExecutable" Guid="*">
-                    <File Source="dist\mcagent.exe" />
-                  </Component>
-                </Directory>
-              </StandardDirectory>
-
-              <ComponentGroup Id="MainComponents">
-                <ComponentRef Id="MainExecutable" />
-              </ComponentGroup>
-            </Package>
-          </Wix>
-          "@ | Out-File -FilePath "mcagent.wxs" -Encoding UTF8
-
-      - name: Build MSI
-        run: |
-          wix build mcagent.wxs -o mcagent.msi -arch x64 -ext WixToolset.UI.wixext
-
-      - name: Upload MSI as release artifact
+      - name: Upload executable as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mcagent-installer
-          path: mcagent.msi
+          name: fluxite-agent-executable
+          path: dist/fluxite-agent.exe
 
-      - name: Attach MSI to GitHub Release
+      - name: Attach executable to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: mcagent.msi
+          files: dist/fluxite-agent.exe
