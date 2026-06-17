@@ -1,0 +1,6 @@
+[submodule "fluxite-service"]
+	path = fluxite-service
+	url = https://github.com/Usergnalin/fluxite-service.git
+[submodule "fluxite-installer"]
+	path = fluxite-installer
+	url = https://github.com/Usergnalin/fluxite-installer.git
