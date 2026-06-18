@@ -14,6 +14,7 @@ import sys
 import os
 import subprocess
 import requests
+import argparse
 import shutil
 
 from auth import AgentAuth, link_agent, load_signing_key, load_agent_id, load_init_config
@@ -37,83 +38,92 @@ log = logging.getLogger("agent")
 # Initialisation
 # ---------------------------------------------------------------------------
 
-def init_auth() -> AgentAuth:
+def setup_auth(agent_name = None, linking_code = None) -> AgentAuth:
     """Load saved credentials or run the interactive linking flow."""
-    init_config = load_init_config()
+    if linking_code:
+        code = linking_code
+        name = agent_name if not agent_name is None else os.environ.get('COMPUTERNAME')
+    else:
+        name = input("Agent name: ").strip()
+        code = input("Linking code: ").strip()
+
+    if not name or not code:
+        log.error("Agent name and linking code are required")
+        sys.exit(1)
+
+    if not os.path.exists("C:/Program Files/WireGuard/wireguard.exe"):
+        log.error("WireGuard not installed")
+        sys.exit(1)
+
+    agent_id, tunnel_config = link_agent(name, code)
+    # Write WireGuard conf file
+    conf_content = (
+        "[Interface]\n"
+        f"PrivateKey = {tunnel_config['wg_priv_b64']}\n"
+        f"Address = {tunnel_config['assigned_ip']}/32\n"
+        "[Peer]\n"
+        f"PublicKey = {tunnel_config['server_wg_pubkey']}\n"
+        f"Endpoint = {tunnel_config['tunnel_endpoint']}:51820\n"
+        f"AllowedIPs = {tunnel_config['server_wg_ip']}/32\n"
+        "PersistentKeepalive = 25\n"
+    )
+    wireguard_conf_path = os.path.join(TMP_DIR, "wgfluxite.conf")
+    if not os.path.exists(TMP_DIR):
+        os.makedirs(TMP_DIR, exist_ok=True)
+    with open(wireguard_conf_path, "w") as f:
+        f.write(conf_content)
+
+    signing_key = load_signing_key()
+
+    # Register WireGuard tunnel with the Windows service (requires admin privileges)
+    try:
+        # Uninstall the existing tunnel
+        result = subprocess.run(
+            [
+                "C:/Program Files/WireGuard/wireguard.exe",
+                "/uninstalltunnelservice",
+                "wgfluxite"
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False
+        )
+        if result.returncode == 0:
+            log.info("WireGuard tunnel installed via wireguard.exe")
+        else:
+            log.warning("wireguard.exe returned %d: %s", result.returncode, result.stderr.strip())
+
+        # Install the new tunnel
+        result = subprocess.run(
+            [
+                "C:/Program Files/WireGuard/wireguard.exe",
+                "/installtunnelservice",
+                wireguard_conf_path
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0:
+            log.info("WireGuard tunnel installed via wireguard.exe")
+        else:
+            log.warning("wireguard.exe returned %d: %s", result.returncode, result.stderr.strip())
+    except FileNotFoundError:
+        log.warning("wireguard.exe not found — tunnel not installed")
+    except Exception as e:
+        log.warning("Failed to install WireGuard tunnel: %s", e)
+
+    # os.remove(wireguard_conf_path)
+
+    auth = AgentAuth(signing_key, agent_id)
+    auth.ensure_token()
+    return auth
+
+def load_auth() -> AgentAuth:
+    """Load saved credentials"""
     signing_key = load_signing_key()
     agent_id = load_agent_id()
-
-    if not (signing_key and agent_id):
-        log.info("No saved credentials found — starting linking flow")
-        log.info(init_config)
-        if init_config["linking_code"]:
-            code = init_config["linking_code"]
-            name = init_config["agent_name"] if init_config["agent_name"] else os.environ.get('COMPUTERNAME')
-        else:
-            name = input("Agent name: ").strip()
-            code = input("Linking code: ").strip()
-        if not name or not code:
-            log.error("Agent name and linking code are required")
-            sys.exit(1)
-        if not os.path.exists("C:/Program Files/WireGuard/wireguard.exe"):
-            log.error("WireGuard not installed")
-            sys.exit(1)
-
-        agent_id, tunnel_config = link_agent(name, code)
-        # Write WireGuard conf file
-        conf_content = (
-            "[Interface]\n"
-            f"PrivateKey = {tunnel_config['wg_priv_b64']}\n"
-            f"Address = {tunnel_config['assigned_ip']}/32\n"
-            "[Peer]\n"
-            f"PublicKey = {tunnel_config['server_wg_pubkey']}\n"
-            f"Endpoint = {tunnel_config['tunnel_endpoint']}:51820\n"
-            f"AllowedIPs = {tunnel_config['server_wg_ip']}/32\n"
-            "PersistentKeepalive = 25\n"
-        )
-        wireguard_conf_path = os.path.join(TMP_DIR, "wgfluxite.conf")
-        if not os.path.exists(TMP_DIR):
-            os.makedirs(TMP_DIR, exist_ok=True)
-        with open(wireguard_conf_path, "w") as f:
-            f.write(conf_content)
-
-        signing_key = load_signing_key()
-
-        # Register WireGuard tunnel with the Windows service (requires admin privileges)
-        try:
-            subprocess.run(
-                [
-                    "powershell",
-                    "-Command",
-                    f'Start-Process -FilePath "C:/Program Files/WireGuard/wireguard.exe" -ArgumentList "/uninstalltunnelservice", "wgfluxite" -Verb RunAs -Wait'
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False  # Don't raise error if tunnel doesn't exist
-            )
-
-            # Install the new tunnel
-            result = subprocess.run(
-                [
-                    "powershell",
-                    "-Command",
-                    f'Start-Process -FilePath "C:/Program Files/WireGuard/wireguard.exe" -ArgumentList "/installtunnelservice", "{wireguard_conf_path}" -Verb RunAs -Wait'
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                log.info("WireGuard tunnel installed via wireguard.exe")
-            else:
-                log.warning("wireguard.exe returned %d: %s", result.returncode, result.stderr.strip())
-        except FileNotFoundError:
-            log.warning("wireguard.exe not found — tunnel not installed")
-        except Exception as e:
-            log.warning("Failed to install WireGuard tunnel: %s", e)
-
-        os.remove(wireguard_conf_path)
 
     auth = AgentAuth(signing_key, agent_id)
     auth.ensure_token()
@@ -866,7 +876,7 @@ def report_server_deleted(auth: AgentAuth, server_id: str):
 # Required Files Initialization
 # ---------------------------------------------------------------------------
 
-def ensure_required_files() -> bool:
+def install_required_files() -> bool:
     """Download required installer files and JDKs on startup if they don't exist.
     
     Returns True if all files are present/ downloaded successfully,
@@ -906,6 +916,18 @@ def ensure_required_files() -> bool:
         
         if download_and_extract(url, jdk_path, expected_hash=expected_hash, archive_type=archive_type):
             log.info("JDK %d downloaded and extracted successfully", java_version)
+            java_executable_path = os.path.join(jdk_path, "bin", "java.exe")
+            rule_name = f"Fluxite-Java-{java_executable_path}"
+            for direction in ["in", "out"]:
+                result = subprocess.run([
+                    "netsh", "advfirewall", "firewall", "add", "rule",
+                    f"name={rule_name}",
+                    f"dir={direction}",
+                    "action=allow",
+                    f"program={java_executable_path}",
+                    "enable=yes",
+                    "profile=any",
+                ], check=True, capture_output=True)
         else:
             log.error("Failed to download/extract JDK %d", java_version)
             all_ok = False
@@ -918,59 +940,85 @@ def ensure_required_files() -> bool:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    print("=== MC Server Multi-Agent ===")
+    argument_parser = argparse.ArgumentParser(description="Fluxite Agent")
+    sub = argument_parser.add_subparsers(dest="command")
     
-    if not os.path.exists(SERVERS_BASE_DIR):
-        os.makedirs(SERVERS_BASE_DIR)
-
-    # Rotate agent logs and attach a file handler
-    agent_log_path = rotate_agent_logs()
-    file_handler = create_agent_file_handler(agent_log_path)
-    logging.getLogger().addHandler(file_handler)
-    log.info("Agent logs writing to %s", agent_log_path)
-
-    auth = init_auth()
+    # Normal service mode — no args
+    sub.add_parser("run", help="Run the agent service (default)")
     
-    # Download required files if missing
-    if not ensure_required_files():
-        log.error("Failed to download required files. Continuing anyway...")
+    # First-run setup
+    setup = sub.add_parser("setup", help="Elevated first-run provisioning")
+    setup.add_argument("linking_code", help="Linking code from the panel")
+    setup.add_argument("agent_name",   nargs="?",  # optional
+                       default=os.environ.get("COMPUTERNAME"),
+                       help="Agent display name (defaults to computer name)")
     
-    registry = ServerRegistry()
-    cmd_queue = CommandQueue()
-    poller = CommandPoller(auth, cmd_queue)
-    
-    # Initialize agent log manager
-    agent_log_mgr = AgentLogManager(auth)
+    args = argument_parser.parse_args()
+    print("Arguments:", args)
 
-    # Initialize existing server managers
-    instances: dict[str, MCServerManager] = {}
-    for meta in registry.list_servers():
-        instances[meta.id] = MCServerManager(meta, auth)
-        log.info("Initialized manager for server %s (%s)", meta.name, meta.id)
+    if args.command == "setup":
+        # Rotate agent logs and attach a file handler
+        agent_log_path = rotate_agent_logs()
+        file_handler = create_agent_file_handler(agent_log_path)
+        logging.getLogger().addHandler(file_handler)
+        log.info("Agent logs writing to %s", agent_log_path)
+        auth = setup_auth(args.agent_name, args.linking_code)
+        for retry in range(5):
+            if install_required_files():
+                return True
+            else:
+                log.warning("Failed to download all required files. Retry %d", retry + 1)
+        log.info("Setup completed")
+        # TODO try delete agent from api if fails
+        
+    else: 
+        if not os.path.exists(SERVERS_BASE_DIR):
+            os.makedirs(SERVERS_BASE_DIR)
 
-    poller.start()
-    log.info("Poller running (SSE mode). Press Ctrl+C to stop.")
+        # Rotate agent logs and attach a file handler
+        agent_log_path = rotate_agent_logs()
+        file_handler = create_agent_file_handler(agent_log_path)
+        logging.getLogger().addHandler(file_handler)
+        log.info("Agent logs writing to %s", agent_log_path)
 
-    try:
-        while True:
-            try:
-                cmd = cmd_queue.get(block=True, timeout=1.0)
-            except queue.Empty:
-                continue
-            success, feedback = handle_command(cmd, poller, registry, instances, auth, agent_log_mgr)
-            if cmd.id:
-                report_command_status(auth, cmd.id, success)
-                report_command_feedback(auth, cmd.id, feedback)
-    except KeyboardInterrupt:
-        print()
-        log.info("Shutting down...")
-    finally:
-        poller.stop()
-        agent_log_mgr.shutdown()
-        for mgr in instances.values():
-            mgr.shutdown()
-        report_agent_offline(auth)
-        log.info("Agent stopped. (%d commands pending)", cmd_queue.pending)
+        auth = load_auth()
+        
+        registry = ServerRegistry()
+        cmd_queue = CommandQueue()
+        poller = CommandPoller(auth, cmd_queue)
+        
+        # Initialize agent log manager
+        agent_log_mgr = AgentLogManager(auth)
+
+        # Initialize existing server managers
+        instances: dict[str, MCServerManager] = {}
+        for meta in registry.list_servers():
+            instances[meta.id] = MCServerManager(meta, auth)
+            log.info("Initialized manager for server %s (%s)", meta.name, meta.id)
+
+        poller.start()
+        log.info("Poller running (SSE mode). Press Ctrl+C to stop.")
+
+        try:
+            while True:
+                try:
+                    cmd = cmd_queue.get(block=True, timeout=1.0)
+                except queue.Empty:
+                    continue
+                success, feedback = handle_command(cmd, poller, registry, instances, auth, agent_log_mgr)
+                if cmd.id:
+                    report_command_status(auth, cmd.id, success)
+                    report_command_feedback(auth, cmd.id, feedback)
+        except KeyboardInterrupt:
+            print()
+            log.info("Shutting down...")
+        finally:
+            poller.stop()
+            agent_log_mgr.shutdown()
+            for mgr in instances.values():
+                mgr.shutdown()
+            report_agent_offline(auth)
+            log.info("Agent stopped. (%d commands pending)", cmd_queue.pending)
 
 if __name__ == "__main__":
     main()

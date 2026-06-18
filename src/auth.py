@@ -84,6 +84,8 @@ def link_agent(name: str, code: str) -> tuple[str, dict]:
 
     resp = requests.post(LINK_URL, json=payload, timeout=REQUEST_TIMEOUT)
     if resp.status_code != 200:
+        if resp.json()["message"] == "Invalid linking code":
+            raise RuntimeError(f"Linking failed. Invalid / Expired Linking code")
         raise RuntimeError(f"Linking failed ({resp.status_code}): {resp.text}")
 
     data = resp.json()

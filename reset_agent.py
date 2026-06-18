@@ -5,14 +5,21 @@ import sys
 
 def main():
     # Files and directories to remove
+    
     to_remove = [
         "agent.key",
         "agent_id.txt",
         "servers.json",
         "servers",
         "tmp",
-        "logs",
+        "logs"
     ]
+    
+    if "-full" in sys.argv:
+        to_remove += [
+            "runtimes",
+            "installers"
+        ]
 
     for item in to_remove:
         if os.path.exists(item):
