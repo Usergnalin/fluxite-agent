@@ -114,7 +114,7 @@ def setup_auth(agent_name = None, linking_code = None) -> AgentAuth:
     except Exception as e:
         log.warning("Failed to install WireGuard tunnel: %s", e)
 
-    # os.remove(wireguard_conf_path)
+    os.remove(wireguard_conf_path)
 
     auth = AgentAuth(signing_key, agent_id)
     auth.ensure_token()
