@@ -1,4 +1,4 @@
-name: Build Executable
+name: Build Installer & Service Executable
 on:
   push:
     tags:
@@ -58,7 +58,7 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
             /O"dist" `
             /F"fluxite-agent-setup" `
-            installer/fluxite-agent.iss
+            setup.iss
 
       - name: Upload installer as artifact
         uses: actions/upload-artifact@v4
