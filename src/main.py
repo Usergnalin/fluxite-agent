@@ -42,7 +42,9 @@ def setup_auth(agent_name = None, linking_code = None) -> AgentAuth:
     """Load saved credentials or run the interactive linking flow."""
     if linking_code:
         code = linking_code
-        name = agent_name if not agent_name is None else os.environ.get('COMPUTERNAME')
+        print(agent_name)
+        name = os.environ.get('COMPUTERNAME') if agent_name is None else agent_name
+        print(name)
     else:
         name = input("Agent name: ").strip()
         code = input("Linking code: ").strip()
@@ -124,6 +126,9 @@ def load_auth() -> AgentAuth:
     """Load saved credentials"""
     signing_key = load_signing_key()
     agent_id = load_agent_id()
+
+    if not signing_key or not agent_id:
+        sys.exit(1)
 
     auth = AgentAuth(signing_key, agent_id)
     auth.ensure_token()
