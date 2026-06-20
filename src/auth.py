@@ -8,6 +8,7 @@ import json
 import uuid
 import base64
 import requests
+from network import request_with_retry
 from nacl.signing import SigningKey
 from nacl.public import PrivateKey
 
@@ -75,7 +76,7 @@ def link_agent(name: str, code: str) -> tuple[str, dict]:
         "tunnel_public_key": wg_pub_b64,
     }
 
-    resp = requests.post(LINK_URL, json=payload, timeout=REQUEST_TIMEOUT)
+    resp = request_with_retry(LINK_URL, "POST", json=payload)
     if resp.status_code != 200:
         if resp.json()["message"] == "Invalid linking code":
             raise RuntimeError(f"Linking failed. Invalid / Expired Linking code")

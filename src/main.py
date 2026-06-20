@@ -14,7 +14,6 @@ import sys
 import os
 import subprocess
 import requests
-import time
 import argparse
 import shutil
 import ctypes
@@ -24,9 +23,10 @@ from commands import CommandQueue, CommandType
 from poller import CommandPoller
 from server_manager import MCServerManager
 from models import ServerRegistry, ServerMetadata
-from config import SERVERS_BASE_DIR, CREATE_SERVER_URL, UPDATE_SERVER_THUMBNAIL, REQUEST_TIMEOUT, BASE_DIR
+from config import SERVERS_BASE_DIR, CREATE_SERVER_URL, UPDATE_SERVER_THUMBNAIL, REQUEST_TIMEOUT, BASE_DIR, WG_INTERFACE
 from agent_log_manager import AgentLogManager, rotate_agent_logs, create_agent_file_handler
 from utils import uuid7
+from network import find_wireguard_exe, install_wireguard_tunnel, uninstall_wireguard_tunnel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,116 +52,6 @@ def require_admin() -> None:
             "Please re-run the script as Administrator."
         )
     
-def _find_wireguard_exe() -> str | None:
-    """
-    Find wireguard.exe using multiple methods. Returns path string or None.
-    Privileged function
-    """
-
-    # Method 1: Check common/env-expanded paths
-    candidates = [
-        r"C:\Program Files\WireGuard\wireguard.exe",
-        r"C:\Program Files (x86)\WireGuard\wireguard.exe",
-        r"C:\WireGuard\wireguard.exe",
-        r"C:\ProgramData\WireGuard\wireguard.exe",
-        os.path.expandvars(r"%APPDATA%\WireGuard\wireguard.exe"),
-        os.path.expandvars(r"%LOCALAPPDATA%\WireGuard\wireguard.exe"),
-    ]
-    for path in candidates:
-        if os.path.isfile(path):
-            return path
-
-    # Method 2: Search WireGuard subdirs under Program Files variants
-    pf_dirs = filter(None, [
-        os.environ.get('ProgramFiles'),
-        os.environ.get('ProgramFiles(x86)'),
-        os.environ.get('ProgramW6432'),
-    ])
-    for base in pf_dirs:
-        exe = os.path.join(base, 'WireGuard', 'wireguard.exe')
-        if os.path.isfile(exe):
-            return exe
-
-    # Method 3: Walk PATH
-    for dir_ in os.environ.get('PATH', '').split(os.pathsep):
-        exe = os.path.join(dir_, 'wireguard.exe')
-        if os.path.isfile(exe):
-            return exe
-
-    # Method 4: `where` command (Windows only)
-    try:
-        result = subprocess.run(
-            ['where', 'wireguard.exe'],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            first = result.stdout.strip().splitlines()[0]
-            if os.path.isfile(first):
-                return first
-    except (FileNotFoundError, OSError):
-        pass
-
-    # Method 5: Registry lookup (Windows only)
-    try:
-        import winreg
-        reg_keys = [
-            (winreg.HKEY_LOCAL_MACHINE,
-             r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\wireguard.exe"),
-            (winreg.HKEY_LOCAL_MACHINE,
-             r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\wireguard.exe"),
-        ]
-        for hive, subkey in reg_keys:
-            try:
-                with winreg.OpenKey(hive, subkey) as key:
-                    exe, _ = winreg.QueryValueEx(key, "")
-                if os.path.isfile(exe):
-                    return exe
-            except OSError:
-                continue
-    except ImportError:
-        pass
-
-    return None
-
-def _install_wireguard_tunnel(wireguard_exe_path: str, conf_path: str) -> None:
-    """Uninstall any existing tunnel, then install the new one."""
-    result = subprocess.run(
-        [wireguard_exe_path, "/uninstalltunnelservice", "wgfluxite"],
-        capture_output=True, text=True, timeout=30, check=False,
-    )
-    if result.returncode == 0:
-        log.info("Old WireGuard tunnel service uninstalled")
-    else:
-        log.warning(
-            "WireGuard uninstall returned %d: %s",
-            result.returncode, result.stderr.strip()
-        )
-    time.sleep(2)
-    result = subprocess.run(
-        [wireguard_exe_path, "/installtunnelservice", conf_path],
-        capture_output=True, text=True, timeout=30, check=False,
-    )
-    if result.returncode == 0:
-        log.info("WireGuard tunnel service installed")
-    else:
-        log.error("WireGuard install failed: %s", result.stderr.strip())
-        raise RuntimeError(f"WireGuard tunnel installation failed (exit {result.returncode})")
-    
-def _uninstall_wireguard_tunnel(wireguard_exe_path: str) -> None:
-    """Uninstall any existing tunnel"""
-    result = subprocess.run(
-        [wireguard_exe_path, "/uninstalltunnelservice", "wgfluxite"],
-        capture_output=True, text=True, timeout=30, check=False,
-    )
-    if result.returncode == 0:
-        log.info("WireGuard tunnel service uninstalled")
-    else:
-        log.warning(
-            "WireGuard uninstall returned %d: %s",
-            result.returncode, result.stderr.strip()
-        )
-
 def setup_auth(linking_code, agent_name) -> AgentAuth:
     """Load saved credentials or run the interactive linking flow."""
     if not agent_name or not linking_code:
@@ -1035,7 +925,7 @@ def main() -> None:
         try:
             require_admin()
 
-            wireguard_exe_path = _find_wireguard_exe()
+            wireguard_exe_path = find_wireguard_exe()
             if not wireguard_exe_path:
                 log.error("WireGuard not installed")
                 raise RuntimeError("WireGuard executable not found")
@@ -1058,19 +948,18 @@ def main() -> None:
                 f"AllowedIPs = {tunnel_config['server_wg_ip']}/32\n"
                 "PersistentKeepalive = 25\n"
             )
-            wireguard_conf_path = os.path.join(BASE_DIR, "wgfluxite.conf")
+            wireguard_conf_path = os.path.join(BASE_DIR, f"{WG_INTERFACE}.conf")
             os.makedirs(BASE_DIR, exist_ok=True)
             with open(wireguard_conf_path, "w") as f:
                 f.write(conf_content)
 
-            _install_wireguard_tunnel(wireguard_exe_path, wireguard_conf_path)
+            install_wireguard_tunnel(wireguard_exe_path, wireguard_conf_path)
 
             for retry in range(5):
                 if install_required_files():
                     break
                 log.warning("Failed to download required files, retry %d/5", retry + 1)
             else:
-                # for/else triggers when the loop finishes without hitting break
                 raise RuntimeError("Failed to download required files after 5 attempts")
 
             log.info("Setup completed successfully")
@@ -1105,10 +994,10 @@ def main() -> None:
             log.fatal("Cleanup requires administrator privileges: %s", e)
             sys.exit(1)
 
-        wireguard_exe_path = _find_wireguard_exe()
+        wireguard_exe_path = find_wireguard_exe()
         if wireguard_exe_path:
             try:
-                _uninstall_wireguard_tunnel(wireguard_exe_path)
+                uninstall_wireguard_tunnel(wireguard_exe_path)
             except Exception as e:
                 log.error("Failed to uninstall WireGuard tunnel: %s", e)
                 failed = True

@@ -167,3 +167,13 @@ COMMAND_FEEDBACK_URL_TPL = API_BASE + "/command/{}/feedback"
 # Polling
 TOKEN_REFRESH_INTERVAL = 60 * 30   # 30 minutes
 REQUEST_TIMEOUT = 10               # seconds
+
+WG_INTERFACE = "wgfluxite"
+MC_PORT_LOW = 25565
+MC_PORT_HIGH = 25600
+
+FIREWALL_RULES = [
+    ("Fluxite WG Block UDP", "UDP", None, None),
+    ("Fluxite WG Block Low TCP", "TCP", 1, MC_PORT_LOW - 1),
+    ("Fluxite WG Block High TCP", "TCP", MC_PORT_HIGH + 1, 65535),
+]
