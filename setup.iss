@@ -91,13 +91,6 @@ begin
       '/i "' + ExpandConstant('{tmp}\') + WireGuardMsi + '" /qn /norestart',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    if (ResultCode <> 0) and (ResultCode <> 1638) then
-    begin
-      // 1638 = another version already installed — acceptable, continue
-      MsgBox('WireGuard installation failed (code ' + IntToStr(ResultCode) + ').' + #13#10 + 'The agent cannot function without WireGuard.', mbError, MB_OK);
-      Exit;
-    end;
-
     // Wait for WireGuard driver to register
     for I := 1 to 15 do
     begin
