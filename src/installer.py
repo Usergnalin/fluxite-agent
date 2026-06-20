@@ -417,7 +417,8 @@ def setup_server_directory(server_id: str, game_version: str, loader_version: st
             f.write(f"motd={motd}\n")
         
         # Set server icon
-        set_server_icon(server_dir, server_thumnbnail)
+        if server_thumnbnail:
+            set_server_icon(server_dir, server_thumnbnail)
         
         java_version = get_java_version(game_version)
 

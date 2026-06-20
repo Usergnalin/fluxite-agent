@@ -97,7 +97,7 @@ begin
     // ── Elevated first-run setup ──────────────────────────────────────────────
     // Runs synchronously as admin (child of this installer process).
     // Handles: API linking, WireGuard tunnel install, JDK downloads,
-    //          firewall rules, mod loader downloads.
+    //          java firewall rules, mod loader downloads.
     AgentName := ConfigPage.Values[1];
     if AgentName = '' then
       AgentName := GetComputerNameString;
@@ -106,7 +106,7 @@ begin
     AddQuotes(ConfigPage.Values[0]) + ' ' +
     AddQuotes(AgentName),
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    
+
     if ResultCode <> 0 then
     begin
       MsgBox(

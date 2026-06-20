@@ -38,18 +38,9 @@ log = logging.getLogger("agent")
 # Initialisation
 # ---------------------------------------------------------------------------
 
-def setup_auth(agent_name = None, linking_code = None) -> AgentAuth:
+def setup_auth(linking_code, agent_name) -> AgentAuth:
     """Load saved credentials or run the interactive linking flow."""
-    if linking_code:
-        code = linking_code
-        print(agent_name)
-        name = os.environ.get('COMPUTERNAME') if agent_name is None else agent_name
-        print(name)
-    else:
-        name = input("Agent name: ").strip()
-        code = input("Linking code: ").strip()
-
-    if not name or not code:
+    if not agent_name or not linking_code:
         log.error("Agent name and linking code are required")
         sys.exit(1)
 
@@ -57,7 +48,7 @@ def setup_auth(agent_name = None, linking_code = None) -> AgentAuth:
         log.error("WireGuard not installed")
         sys.exit(1)
 
-    agent_id, tunnel_config = link_agent(name, code)
+    agent_id, tunnel_config = link_agent(agent_name, linking_code)
     # Write WireGuard conf file
     conf_content = (
         "[Interface]\n"
@@ -92,7 +83,7 @@ def setup_auth(agent_name = None, linking_code = None) -> AgentAuth:
             check=False
         )
         if result.returncode == 0:
-            log.info("WireGuard tunnel installed via wireguard.exe")
+            log.info("Old wireGuard tunnel service uninstalled")
         else:
             log.warning("wireguard.exe returned %d: %s", result.returncode, result.stderr.strip())
 
@@ -108,15 +99,14 @@ def setup_auth(agent_name = None, linking_code = None) -> AgentAuth:
             timeout=30
         )
         if result.returncode == 0:
-            log.info("WireGuard tunnel installed via wireguard.exe")
+            log.info("WireGuard tunnel service installed")
         else:
-            log.warning("wireguard.exe returned %d: %s", result.returncode, result.stderr.strip())
+            log.error("Wireguard installation failed %s", result.stderr.strip())
+            sys.exit(1)
     except FileNotFoundError:
         log.warning("wireguard.exe not found — tunnel not installed")
     except Exception as e:
         log.warning("Failed to install WireGuard tunnel: %s", e)
-
-    os.remove(wireguard_conf_path)
 
     auth = AgentAuth(signing_key, agent_id)
     auth.ensure_token()
@@ -151,9 +141,15 @@ def register_server_with_api(auth: AgentAuth, meta: ServerMetadata):
         create_server_resp = requests.post(CREATE_SERVER_URL, json=payload, headers=headers, timeout=REQUEST_TIMEOUT)
         create_server_resp.raise_for_status()
         log.info("Server %s successfully registered with API", meta.id)
-        update_server_thumbnail_resp = requests.put(UPDATE_SERVER_THUMBNAIL.format(meta.id), json={"server_thumbnail": meta.server_thumbnail}, headers=headers, timeout=REQUEST_TIMEOUT)
-        update_server_thumbnail_resp.raise_for_status()
-        log.info("Server %s thumbnail updated", meta.id)
+        if meta.server_thumbnail:
+            update_server_thumbnail_resp = requests.put(
+                UPDATE_SERVER_THUMBNAIL.format(meta.id),
+                json={"server_thumbnail": meta.server_thumbnail},
+                headers=headers,
+                timeout=REQUEST_TIMEOUT
+            )
+            update_server_thumbnail_resp.raise_for_status()
+            log.info("Server %s thumbnail updated", meta.id)
     except Exception as e:
         log.error("Failed to register server %s with API: %s", meta.id, e)
 
@@ -217,7 +213,7 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
         server_name = cmd.payload.get("name")
         mc_version = cmd.payload.get("mc_version")
         loader_type = cmd.payload.get("loader_type")
-        thumbnail_url = cmd.payload.get("server_thumbnail")
+        thumbnail_url = cmd.payload.get("server_thumbnail", None)
         if loader_type != "vanilla":
             loader_version = cmd.payload.get("loader_version")
             if not server_name or not mc_version or not loader_version or not loader_type:
@@ -298,6 +294,7 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
         version_id = cmd.payload.get("version_id")
         file_name = cmd.payload.get("file_name")
         expected_hash = cmd.payload.get("manifest_hash")
+        thumbnail_url = cmd.payload.get("server_thumbnail", None)
         
         if not modpack_name or not project_id or not version_id or not file_name or not expected_hash:
             log.error("CREATE_MODPACK failed: 'name', 'project_id', 'version_id', 'file_name', and 'manifest_hash' are all required.")
@@ -388,7 +385,7 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
                 port=port,
                 path=server_path,
                 entrypoint=entrypoint,
-                server_thumbnail=None,
+                server_thumbnail=thumbnail_url,
                 java_version=java_version,
                 properties=properties,
                 modules=modules_metadata,
@@ -967,7 +964,7 @@ def main() -> None:
         file_handler = create_agent_file_handler(agent_log_path)
         logging.getLogger().addHandler(file_handler)
         log.info("Agent logs writing to %s", agent_log_path)
-        auth = setup_auth(args.agent_name, args.linking_code)
+        auth = setup_auth(linking_code=args.linking_code, agent_name=args.agent_name)
         for retry in range(5):
             if install_required_files():
                 return True
