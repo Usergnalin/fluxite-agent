@@ -14,16 +14,17 @@ import sys
 import os
 import subprocess
 import requests
+import time
 import argparse
 import shutil
+import ctypes
 
-from auth import AgentAuth, link_agent, load_signing_key, load_agent_id, load_init_config
+from auth import AgentAuth, link_agent, load_signing_key, load_agent_id, unlink_agent_with_api
 from commands import CommandQueue, CommandType
 from poller import CommandPoller
 from server_manager import MCServerManager
 from models import ServerRegistry, ServerMetadata
-from installer import setup_server_directory, parse_server_properties
-from config import SERVERS_BASE_DIR, CREATE_SERVER_URL, UPDATE_SERVER_THUMBNAIL, REQUEST_TIMEOUT, TMP_DIR
+from config import SERVERS_BASE_DIR, CREATE_SERVER_URL, UPDATE_SERVER_THUMBNAIL, REQUEST_TIMEOUT, BASE_DIR
 from agent_log_manager import AgentLogManager, rotate_agent_logs, create_agent_file_handler
 from utils import uuid7
 
@@ -38,79 +39,142 @@ log = logging.getLogger("agent")
 # Initialisation
 # ---------------------------------------------------------------------------
 
+def require_admin() -> None:
+    """Raise PermissionError if the process is not running as administrator."""
+    try:
+        is_admin = ctypes.windll.shell32.IsUserAnAdmin()
+    except AttributeError:
+        raise RuntimeError("Admin check is only supported on Windows")
+
+    if not is_admin:
+        raise PermissionError(
+            "This operation requires administrator privileges. "
+            "Please re-run the script as Administrator."
+        )
+    
+def _find_wireguard_exe() -> str | None:
+    """
+    Find wireguard.exe using multiple methods. Returns path string or None.
+    Privileged function
+    """
+
+    # Method 1: Check common/env-expanded paths
+    candidates = [
+        r"C:\Program Files\WireGuard\wireguard.exe",
+        r"C:\Program Files (x86)\WireGuard\wireguard.exe",
+        r"C:\WireGuard\wireguard.exe",
+        r"C:\ProgramData\WireGuard\wireguard.exe",
+        os.path.expandvars(r"%APPDATA%\WireGuard\wireguard.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\WireGuard\wireguard.exe"),
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+
+    # Method 2: Search WireGuard subdirs under Program Files variants
+    pf_dirs = filter(None, [
+        os.environ.get('ProgramFiles'),
+        os.environ.get('ProgramFiles(x86)'),
+        os.environ.get('ProgramW6432'),
+    ])
+    for base in pf_dirs:
+        exe = os.path.join(base, 'WireGuard', 'wireguard.exe')
+        if os.path.isfile(exe):
+            return exe
+
+    # Method 3: Walk PATH
+    for dir_ in os.environ.get('PATH', '').split(os.pathsep):
+        exe = os.path.join(dir_, 'wireguard.exe')
+        if os.path.isfile(exe):
+            return exe
+
+    # Method 4: `where` command (Windows only)
+    try:
+        result = subprocess.run(
+            ['where', 'wireguard.exe'],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            first = result.stdout.strip().splitlines()[0]
+            if os.path.isfile(first):
+                return first
+    except (FileNotFoundError, OSError):
+        pass
+
+    # Method 5: Registry lookup (Windows only)
+    try:
+        import winreg
+        reg_keys = [
+            (winreg.HKEY_LOCAL_MACHINE,
+             r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\wireguard.exe"),
+            (winreg.HKEY_LOCAL_MACHINE,
+             r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\wireguard.exe"),
+        ]
+        for hive, subkey in reg_keys:
+            try:
+                with winreg.OpenKey(hive, subkey) as key:
+                    exe, _ = winreg.QueryValueEx(key, "")
+                if os.path.isfile(exe):
+                    return exe
+            except OSError:
+                continue
+    except ImportError:
+        pass
+
+    return None
+
+def _install_wireguard_tunnel(wireguard_exe_path: str, conf_path: str) -> None:
+    """Uninstall any existing tunnel, then install the new one."""
+    result = subprocess.run(
+        [wireguard_exe_path, "/uninstalltunnelservice", "wgfluxite"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if result.returncode == 0:
+        log.info("Old WireGuard tunnel service uninstalled")
+    else:
+        log.warning(
+            "WireGuard uninstall returned %d: %s",
+            result.returncode, result.stderr.strip()
+        )
+    time.sleep(2)
+    result = subprocess.run(
+        [wireguard_exe_path, "/installtunnelservice", conf_path],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if result.returncode == 0:
+        log.info("WireGuard tunnel service installed")
+    else:
+        log.error("WireGuard install failed: %s", result.stderr.strip())
+        raise RuntimeError(f"WireGuard tunnel installation failed (exit {result.returncode})")
+    
+def _uninstall_wireguard_tunnel(wireguard_exe_path: str) -> None:
+    """Uninstall any existing tunnel"""
+    result = subprocess.run(
+        [wireguard_exe_path, "/uninstalltunnelservice", "wgfluxite"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if result.returncode == 0:
+        log.info("WireGuard tunnel service uninstalled")
+    else:
+        log.warning(
+            "WireGuard uninstall returned %d: %s",
+            result.returncode, result.stderr.strip()
+        )
+
 def setup_auth(linking_code, agent_name) -> AgentAuth:
     """Load saved credentials or run the interactive linking flow."""
     if not agent_name or not linking_code:
-        log.error("Agent name and linking code are required")
-        sys.exit(1)
-
-    if not os.path.exists("C:/Program Files/WireGuard/wireguard.exe"):
-        log.error("WireGuard not installed")
-        sys.exit(1)
+        log.error("Required agent name and linking code are not provided")
+        raise ValueError("agent_name and linking_code cannot be empty")
 
     agent_id, tunnel_config = link_agent(agent_name, linking_code)
-    # Write WireGuard conf file
-    conf_content = (
-        "[Interface]\n"
-        f"PrivateKey = {tunnel_config['wg_priv_b64']}\n"
-        f"Address = {tunnel_config['assigned_ip']}/32\n"
-        "[Peer]\n"
-        f"PublicKey = {tunnel_config['server_wg_pubkey']}\n"
-        f"Endpoint = {tunnel_config['tunnel_endpoint']}:51820\n"
-        f"AllowedIPs = {tunnel_config['server_wg_ip']}/32\n"
-        "PersistentKeepalive = 25\n"
-    )
-    wireguard_conf_path = os.path.join(TMP_DIR, "wgfluxite.conf")
-    if not os.path.exists(TMP_DIR):
-        os.makedirs(TMP_DIR, exist_ok=True)
-    with open(wireguard_conf_path, "w") as f:
-        f.write(conf_content)
-
+    
     signing_key = load_signing_key()
-
-    # Register WireGuard tunnel with the Windows service (requires admin privileges)
-    try:
-        # Uninstall the existing tunnel
-        result = subprocess.run(
-            [
-                "C:/Program Files/WireGuard/wireguard.exe",
-                "/uninstalltunnelservice",
-                "wgfluxite"
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False
-        )
-        if result.returncode == 0:
-            log.info("Old wireGuard tunnel service uninstalled")
-        else:
-            log.warning("wireguard.exe returned %d: %s", result.returncode, result.stderr.strip())
-
-        # Install the new tunnel
-        result = subprocess.run(
-            [
-                "C:/Program Files/WireGuard/wireguard.exe",
-                "/installtunnelservice",
-                wireguard_conf_path
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        if result.returncode == 0:
-            log.info("WireGuard tunnel service installed")
-        else:
-            log.error("Wireguard installation failed %s", result.stderr.strip())
-            sys.exit(1)
-    except FileNotFoundError:
-        log.warning("wireguard.exe not found — tunnel not installed")
-    except Exception as e:
-        log.warning("Failed to install WireGuard tunnel: %s", e)
 
     auth = AgentAuth(signing_key, agent_id)
     auth.ensure_token()
-    return auth
+    return auth, tunnel_config
 
 def load_auth() -> AgentAuth:
     """Load saved credentials"""
@@ -955,27 +1019,118 @@ def main() -> None:
                        default=os.environ.get("COMPUTERNAME"),
                        help="Agent display name (defaults to computer name)")
     
+    sub.add_parser("cleanup", help="Remove agent and clean up system")
+    
     args = argument_parser.parse_args()
     print("Arguments:", args)
 
     if args.command == "setup":
-        # Rotate agent logs and attach a file handler
         agent_log_path = rotate_agent_logs()
         file_handler = create_agent_file_handler(agent_log_path)
         logging.getLogger().addHandler(file_handler)
         log.info("Agent logs writing to %s", agent_log_path)
-        auth = setup_auth(linking_code=args.linking_code, agent_name=args.agent_name)
-        for retry in range(5):
-            if install_required_files():
-                return True
+
+        auth = None  # Track registration state for rollback
+
+        try:
+            require_admin()
+
+            wireguard_exe_path = _find_wireguard_exe()
+            if not wireguard_exe_path:
+                log.error("WireGuard not installed")
+                raise RuntimeError("WireGuard executable not found")
+
+            # Registration point — rollback needed if anything fails after this
+            auth, tunnel_config = setup_auth(linking_code=args.linking_code, agent_name=args.agent_name)
+
+            required_keys = {'wg_priv_b64', 'assigned_ip', 'server_wg_pubkey', 'tunnel_endpoint', 'server_wg_ip'}
+            missing = required_keys - tunnel_config.keys()
+            if missing:
+                raise ValueError(f"Incomplete tunnel config, missing: {missing}")
+
+            conf_content = (
+                "[Interface]\n"
+                f"PrivateKey = {tunnel_config['wg_priv_b64']}\n"
+                f"Address = {tunnel_config['assigned_ip']}/32\n"
+                "[Peer]\n"
+                f"PublicKey = {tunnel_config['server_wg_pubkey']}\n"
+                f"Endpoint = {tunnel_config['tunnel_endpoint']}:51820\n"
+                f"AllowedIPs = {tunnel_config['server_wg_ip']}/32\n"
+                "PersistentKeepalive = 25\n"
+            )
+            wireguard_conf_path = os.path.join(BASE_DIR, "wgfluxite.conf")
+            os.makedirs(BASE_DIR, exist_ok=True)
+            with open(wireguard_conf_path, "w") as f:
+                f.write(conf_content)
+
+            _install_wireguard_tunnel(wireguard_exe_path, wireguard_conf_path)
+
+            for retry in range(5):
+                if install_required_files():
+                    break
+                log.warning("Failed to download required files, retry %d/5", retry + 1)
             else:
-                log.warning("Failed to download all required files. Retry %d", retry + 1)
-        log.info("Setup completed")
-        # TODO try delete agent from api if fails
+                # for/else triggers when the loop finishes without hitting break
+                raise RuntimeError("Failed to download required files after 5 attempts")
+
+            log.info("Setup completed successfully")
+
+        except Exception as error:
+            log.fatal("Setup failed: %s", error)
+
+            if auth is not None:
+                log.info("Rolling back — unlinking agent from API...")
+                try:
+                    unlink_agent_with_api(auth)
+                    log.info("Rollback successful — agent unlinked")
+                except Exception as rollback_error:
+                    log.error(
+                        "Rollback failed — agent may still be registered. "
+                        "Please manually delete the agent. Error: %s",
+                        rollback_error,
+                    )
+
+            sys.exit(1)
+    elif args.command == "cleanup":
+        agent_log_path = rotate_agent_logs()
+        file_handler = create_agent_file_handler(agent_log_path)
+        logging.getLogger().addHandler(file_handler)
+        log.info("Agent logs writing to %s", agent_log_path)
+
+        failed = False
+
+        try:
+            require_admin()
+        except PermissionError as e:
+            log.fatal("Cleanup requires administrator privileges: %s", e)
+            sys.exit(1)
+
+        wireguard_exe_path = _find_wireguard_exe()
+        if wireguard_exe_path:
+            try:
+                _uninstall_wireguard_tunnel(wireguard_exe_path)
+            except Exception as e:
+                log.error("Failed to uninstall WireGuard tunnel: %s", e)
+                failed = True
+        else:
+            log.warning("WireGuard not installed, skipping tunnel cleanup")
+
+        try:
+            auth = load_auth()
+            unlink_agent_with_api(auth)
+            log.info("Agent unlinked from API")
+        except Exception as e:
+            log.warning("Unable to unlink agent from API, remove it manually. Error: %s", e)
+            failed = True
+
+        if failed:
+            log.error("Cleanup completed with errors")
+            sys.exit(1)
+
+        log.info("Cleanup completed successfully")
         
     else: 
-        if not os.path.exists(SERVERS_BASE_DIR):
-            os.makedirs(SERVERS_BASE_DIR)
+        os.makedirs(SERVERS_BASE_DIR)
 
         # Rotate agent logs and attach a file handler
         agent_log_path = rotate_agent_logs()

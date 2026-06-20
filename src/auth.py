@@ -13,7 +13,7 @@ from nacl.public import PrivateKey
 
 from config import (
     LINK_URL, REFRESH_URL_TPL, KEY_FILE, ID_FILE, INIT_CONFIG_FILE,
-    TOKEN_REFRESH_INTERVAL, REQUEST_TIMEOUT,
+    TOKEN_REFRESH_INTERVAL, REQUEST_TIMEOUT, DELETE_AGENT_URL
 )
 
 # ---------------------------------------------------------------------------
@@ -114,7 +114,6 @@ def link_agent(name: str, code: str) -> tuple[str, dict]:
 
     return agent_id, tunnel_config
 
-
 # ---------------------------------------------------------------------------
 # Token refresh
 # ---------------------------------------------------------------------------
@@ -193,3 +192,9 @@ class AgentAuth:
     def auth_header(self) -> dict:
         """Return an Authorization header dict with a valid Bearer token."""
         return {"Authorization": f"Bearer {self.ensure_token()}"}
+    
+def unlink_agent_with_api(auth: AgentAuth):
+    """Delete API record of agent"""
+    headers = auth.auth_header()
+    create_server_resp = requests.delete(DELETE_AGENT_URL, headers=headers, timeout=REQUEST_TIMEOUT)
+    create_server_resp.raise_for_status()

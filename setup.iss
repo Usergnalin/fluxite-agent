@@ -91,8 +91,24 @@ begin
       '/i "' + ExpandConstant('{tmp}\') + WireGuardMsi + '" /qn /norestart',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    // Wait for WireGuard driver to register — 2s is plenty
-    Sleep(2000);
+    if (ResultCode <> 0) and (ResultCode <> 1638) then
+    begin
+      // 1638 = another version already installed — acceptable, continue
+      MsgBox('WireGuard installation failed (code ' + IntToStr(ResultCode) + ').' +
+        #13#10 + 'The agent cannot function without WireGuard.',
+        mbError, MB_OK);
+      Exit;
+    end;
+
+    // Wait for WireGuard driver to register
+    var I: Integer;
+    for I := 1 to 15 do
+    begin
+      Exec('sc', 'query WireGuardManager',
+        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      if ResultCode = 0 then Break;
+      Sleep(1000);
+    end;
 
     // ── Elevated first-run setup ──────────────────────────────────────────────
     // Runs synchronously as admin (child of this installer process).
@@ -103,7 +119,7 @@ begin
       AgentName := GetComputerNameString;
     Exec(ExpandConstant('{app}\fluxite-agent.exe'),
     'setup ' +
-    AddQuotes(ConfigPage.Values[0]) + ' ' +
+    AddQuotes(Trim(ConfigPage.Values[0])) + ' ' +
     AddQuotes(AgentName),
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
@@ -122,6 +138,11 @@ begin
     // ── Service ───────────────────────────────────────────────────────────────
     // Runs as NetworkService — no admin rights, no SCM rights, no WireGuard
     // rights. Setup is complete so the service never needs elevation.
+    Exec('sc', 'stop FluxiteAgentService',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('sc', 'delete FluxiteAgentService',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(1000); // give SCM time to process the delete
     Exec('sc',
       'create FluxiteAgentService ' +
       'binPath= "' + ExpandConstant('{app}\fluxite-agent.exe') + '" ' +
@@ -152,10 +173,8 @@ begin
     Exec('sc', 'delete FluxiteAgentService',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    // Remove the WireGuard tunnel the agent created during setup
-    Exec(ExpandConstant('{app}\wireguard.exe'),
-      '/uninstalltunnelservice wgfluxite',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{app}\fluxite-agent.exe'),'cleanup ',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
     // Wipe all agent data (creds, runtimes, logs, JDKs, mod loaders)
     DelTree(ExpandConstant('{commonappdata}\FluxiteAgent'), True, True, True);

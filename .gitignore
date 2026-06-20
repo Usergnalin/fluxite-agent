@@ -225,6 +225,7 @@ installers/
 # agent data
 agent.key
 agent_id.txt
+wgfluxite.conf
 config.json
 servers.json
 servers/
