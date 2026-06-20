@@ -56,9 +56,10 @@ jobs:
         shell: pwsh
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
-            /O"dist" `
-            /F"fluxite-agent-setup" `
-            setup.iss
+          /O"dist" `
+          /DAppVersion="${{ github.ref_name }}" `
+          /F"fluxite-agent-setup" `
+          setup.iss
 
       - name: Upload installer as artifact
         uses: actions/upload-artifact@v4

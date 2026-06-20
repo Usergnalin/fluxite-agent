@@ -1,6 +1,6 @@
 [Setup]
 AppName=Fluxite Agent
-AppVersion=1.0
+AppVersion={#AppVersion}
 DefaultDirName={pf}\FluxiteAgent
 DefaultGroupName=Fluxite Agent
 UninstallDisplayIcon={app}\fluxite-agent.exe
@@ -73,6 +73,7 @@ var
   DataDir: String;
   ResultCode: Integer;
   AgentName: String;
+  I: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
@@ -101,7 +102,6 @@ begin
     end;
 
     // Wait for WireGuard driver to register
-    var I: Integer;
     for I := 1 to 15 do
     begin
       Exec('sc', 'query WireGuardManager',
@@ -142,13 +142,28 @@ begin
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('sc', 'delete FluxiteAgentService',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    Sleep(1000); // give SCM time to process the delete
+    // Wait up to 10s for the service to stop
+    for I := 1 to 10 do
+    begin
+      Exec('sc', 'query FluxiteAgentService',
+        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      if ResultCode <> 0 then Break;
+      Sleep(1000);
+    end;
     Exec('sc',
       'create FluxiteAgentService ' +
       'binPath= "' + ExpandConstant('{app}\fluxite-agent.exe') + '" ' +
       'start= auto ' +
       'obj= "NT AUTHORITY\NetworkService"',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    if ResultCode <> 0 then
+    begin
+      MsgBox('Failed to create Fluxite service (code ' + IntToStr(ResultCode) + ').' +
+        #13#10 + 'Try reinstalling as administrator.',
+        mbError, MB_OK);
+      Exit;
+    end;
 
     Exec('sc',
       'failure FluxiteAgentService reset= 60 ' +
@@ -173,7 +188,7 @@ begin
     Exec('sc', 'delete FluxiteAgentService',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    Exec(ExpandConstant('{app}\fluxite-agent.exe'),'cleanup ',
+    Exec(ExpandConstant('{app}\fluxite-agent.exe'),'cleanup',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
     // Wipe all agent data (creds, runtimes, logs, JDKs, mod loaders)
