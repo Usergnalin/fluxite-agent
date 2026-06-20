@@ -1,0 +1,76 @@
+name: Build Installer & Service Executable
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+jobs:
+  build-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r src/requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable with PyInstaller
+        run: |
+          pyinstaller .spec
+
+      - name: Upload executable as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fluxite-agent-executable
+          path: dist/fluxite-agent.exe
+
+      # ── Installer build ────────────────────────────────────────────────────
+      - name: Stage installer inputs
+        shell: pwsh
+        run: |
+          # Folder that holds .iss and eula.txt in the repo
+          $stage = "."
+
+          Copy-Item dist/fluxite-agent.exe "$stage/fluxite-agent.exe" -Force
+
+          # Download the three WireGuard MSIs the .iss expects.
+          # Filenames MUST match the Source: lines in the .iss exactly.
+          $base = "https://download.wireguard.com/windows-client"
+          foreach ($arch in @("x86", "amd64", "arm64")) {
+            $file = "wireguard-$arch-1.1.msi"
+            Write-Host "Downloading $file"
+            Invoke-WebRequest -Uri "$base/$file" -OutFile $file
+          }
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            /O"dist" `
+            /F"fluxite-agent-setup" `
+            setup.iss
+
+      - name: Upload installer as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fluxite-agent-installer
+          path: dist/fluxite-agent-setup.exe
+
+      # ── Release ────────────────────────────────────────────────────────────
+      - name: Attach exe and installer to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/fluxite-agent.exe
+            dist/fluxite-agent-setup.exe

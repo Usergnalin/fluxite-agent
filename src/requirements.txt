@@ -1,0 +1,9 @@
+certifi==2026.2.25
+cffi==2.0.0
+charset-normalizer==3.4.5
+idna==3.11
+pycparser==3.0
+PyNaCl==1.6.2
+requests==2.32.5
+urllib3==2.6.3
+pillow==11.3.0
