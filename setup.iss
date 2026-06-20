@@ -61,8 +61,7 @@ begin
   begin
     if ConfigPage.Values[0] = '' then
     begin
-      MsgBox('Linking Code is required. Please enter it to continue.',
-             mbError, MB_OK);
+      MsgBox('Linking Code is required. Please enter it to continue.', mbError, MB_OK);
       Result := False;
     end;
   end;
@@ -95,9 +94,7 @@ begin
     if (ResultCode <> 0) and (ResultCode <> 1638) then
     begin
       // 1638 = another version already installed — acceptable, continue
-      MsgBox('WireGuard installation failed (code ' + IntToStr(ResultCode) + ').' +
-        #13#10 + 'The agent cannot function without WireGuard.',
-        mbError, MB_OK);
+      MsgBox('WireGuard installation failed (code ' + IntToStr(ResultCode) + ').' + #13#10 + 'The agent cannot function without WireGuard.', mbError, MB_OK);
       Exit;
     end;
 
@@ -125,13 +122,8 @@ begin
 
     if ResultCode <> 0 then
     begin
-      MsgBox(
-        'Fluxite Agent setup did not complete (exit code ' +
-        IntToStr(ResultCode) + ').'#13#10#13#10 +
-        'Check C:\ProgramData\FluxiteAgent\fluxite.log for details.'#13#10 +
-        'To retry, run "fluxite-agent.exe setup <linking-code>" as administrator.',
-        mbError, MB_OK);
-      // Don't install the service — nothing is ready to run
+      MsgBox('Fluxite Agent setup did not complete (exit code ' + IntToStr(ResultCode) + ').'#13#10#13#10 + 'Check C:\ProgramData\FluxiteAgent\logs/latest.log for details.', mbError, MB_OK);
+      // Don't install the service, setup failed
       Exit;
     end;
 
@@ -159,9 +151,7 @@ begin
 
     if ResultCode <> 0 then
     begin
-      MsgBox('Failed to create Fluxite service (code ' + IntToStr(ResultCode) + ').' +
-        #13#10 + 'Try reinstalling as administrator.',
-        mbError, MB_OK);
+      MsgBox('Failed to create Fluxite service (code ' + IntToStr(ResultCode) + ').' + #13#10 + 'Try reinstalling as administrator.', mbError, MB_OK);
       Exit;
     end;
 
