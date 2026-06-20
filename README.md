@@ -44,7 +44,7 @@ Source lives in `src/`. The main modules:
 | `agent_log_manager.py` | Log capture and management |
 | `utils.py` | Shared helpers |
 
-Runtime state files (generated, not committed): `agent_id.txt`, `agent.key`, `config.json`, `servers.json`.
+Runtime state files (generated, not committed): `agent_id.txt`, `agent.key`, `servers.json`, `wgfluxite.conf`.
 
 `reset_agent.py` is a development helper for clearing local agent state. `setup.iss` is the Inno Setup installer script; `.spec` is the PyInstaller build spec.
 

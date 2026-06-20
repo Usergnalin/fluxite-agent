@@ -159,6 +159,21 @@ begin
 end;
 
 // ── Uninstall ─────────────────────────────────────────────────────────────────
+
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
+  MsgBox(
+    'Before uninstalling Fluxite Agent, please note:' #13#10#13#10
+    'Your Minecraft servers will NOT be stopped automatically. '
+    + 'If you want to stop them cleanly, please do so from the Fluxite panel before continuing.'#13#10#13#10
+    'Your server worlds and Java runtimes will be kept at:'#13#10
+    '  C:\ProgramData\FluxiteAgent\servers'#13#10
+    '  C:\ProgramData\FluxiteAgent\runtimes'#13#10#13#10
+    'You can delete these manually after uninstalling if you no longer need them.',
+    mbInformation, MB_OK);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ResultCode: Integer;
@@ -168,13 +183,33 @@ begin
     // Stop and remove the agent service
     Exec('sc', 'stop FluxiteAgentService',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(2000); // brief grace before force kill
+    Exec('taskkill', '/F /IM fluxite-agent.exe',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exec('sc', 'delete FluxiteAgentService',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(2000); // brief grace for task kill
 
     Exec(ExpandConstant('{app}\fluxite-agent.exe'),'cleanup',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    // Wipe all agent data (creds, runtimes, logs, JDKs, mod loaders)
-    DelTree(ExpandConstant('{commonappdata}\FluxiteAgent'), True, True, True);
+    // Wipe all agent data, keep servers and runtimes
+    // MC servers keep running
+    DelTree(ExpandConstant('{commonappdata}\FluxiteAgent\logs'), True, True, True);
+    DelTree(ExpandConstant('{commonappdata}\FluxiteAgent\installers'), True, True, True);
+    DelTree(ExpandConstant('{commonappdata}\FluxiteAgent\tmp'), True, True, True);
+    DeleteFile(ExpandConstant('{commonappdata}\FluxiteAgent\agent_id.txt'));
+    DeleteFile(ExpandConstant('{commonappdata}\FluxiteAgent\agent.key'));
+    DeleteFile(ExpandConstant('{commonappdata}\FluxiteAgent\servers.json'));
+    DeleteFile(ExpandConstant('{commonappdata}\FluxiteAgent\wgfluxite.conf'));
+
+    MsgBox(
+      'Fluxite Agent has been uninstalled.'#13#10#13#10
+      'Your Minecraft worlds and Java runtimes are still at:'#13#10
+      '  C:\ProgramData\FluxiteAgent\servers'#13#10
+      '  C:\ProgramData\FluxiteAgent\runtimes'#13#10#13#10
+      'Any servers that were running will continue until stopped or the machine restarts. '
+      + 'Delete the folders above manually if you no longer need them.',
+      mbInformation, MB_OK);
   end;
 end;
