@@ -23,7 +23,7 @@ from commands import CommandQueue, CommandType
 from poller import CommandPoller
 from server_manager import MCServerManager
 from models import ServerRegistry, ServerMetadata
-from config import SERVERS_BASE_DIR, CREATE_SERVER_URL, UPDATE_SERVER_THUMBNAIL, REQUEST_TIMEOUT, BASE_DIR, WG_INTERFACE
+from config import SERVERS_BASE_DIR, CREATE_SERVER_URL, UPDATE_SERVER_THUMBNAIL, REQUEST_TIMEOUT, BASE_DIR, WG_INTERFACE, IMPORT_DIR
 from agent_log_manager import AgentLogManager, rotate_agent_logs, create_agent_file_handler
 from utils import uuid7
 from network import find_wireguard_exe, install_wireguard_tunnel, uninstall_wireguard_tunnel
@@ -896,6 +896,11 @@ def install_required_files() -> bool:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    agent_log_path = rotate_agent_logs()
+    file_handler = create_agent_file_handler(agent_log_path)
+    logging.getLogger().addHandler(file_handler)
+    log.info("Agent logs writing to %s", agent_log_path)
+    
     argument_parser = argparse.ArgumentParser(description="Fluxite Agent")
     sub = argument_parser.add_subparsers(dest="command")
     
@@ -912,16 +917,10 @@ def main() -> None:
     sub.add_parser("cleanup", help="Remove agent and clean up system")
     
     args = argument_parser.parse_args()
-    print("Arguments:", args)
+    log.info("Started with arguments:  %s", args)
 
     if args.command == "setup":
-        agent_log_path = rotate_agent_logs()
-        file_handler = create_agent_file_handler(agent_log_path)
-        logging.getLogger().addHandler(file_handler)
-        log.info("Agent logs writing to %s", agent_log_path)
-
         auth = None  # Track registration state for rollback
-
         try:
             require_admin()
 
@@ -981,13 +980,7 @@ def main() -> None:
 
             sys.exit(1)
     elif args.command == "cleanup":
-        agent_log_path = rotate_agent_logs()
-        file_handler = create_agent_file_handler(agent_log_path)
-        logging.getLogger().addHandler(file_handler)
-        log.info("Agent logs writing to %s", agent_log_path)
-
         failed = False
-
         try:
             require_admin()
         except PermissionError as e:
@@ -1019,13 +1012,8 @@ def main() -> None:
         log.info("Cleanup completed successfully")
         
     else: 
-        os.makedirs(SERVERS_BASE_DIR)
-
-        # Rotate agent logs and attach a file handler
-        agent_log_path = rotate_agent_logs()
-        file_handler = create_agent_file_handler(agent_log_path)
-        logging.getLogger().addHandler(file_handler)
-        log.info("Agent logs writing to %s", agent_log_path)
+        os.makedirs(SERVERS_BASE_DIR, exist_ok=True)
+        os.makedirs(IMPORT_DIR, exist_ok=True)
 
         auth = load_auth()
         
@@ -1043,7 +1031,7 @@ def main() -> None:
             log.info("Initialized manager for server %s (%s)", meta.name, meta.id)
 
         poller.start()
-        log.info("Poller running (SSE mode). Press Ctrl+C to stop.")
+        log.info("Poller running, revieving commands from API")
 
         try:
             while True:

@@ -96,14 +96,10 @@ class MCServerManager:
             resp = requests.put(url, json=payload, headers=headers, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
             self._last_reported_status = status
-            log.info("Status transition: Server %s is now '%s'", self.meta.id, status)
+            log.info("Server status update: Server %s (%s) is now '%s'", self.meta.name, self.meta.id, status)
         except Exception as e:
-            # Still record the status as "reported" (or at least "tried") to avoid spamming
-            # unless the user explicitly wants retries on every watchdog cycle.
-            # Given the request to "do not send updates if no change", we'll treat
-            # even a failed attempt as the "last reported" to stop the spam.
             self._last_reported_status = status
-            log.error("Failed to report status for server %s (target: %s): %s", self.meta.id, status, e)
+            log.error("Failed to report status for server %s (%s) (target: %s): %s", self.meta.name, self.meta.id, status, e)
 
     def _start_watchdog(self):
         """Start the background status watchdog."""

@@ -17,6 +17,7 @@ else:
 
 # Base directories
 SERVERS_BASE_DIR = os.path.join(BASE_DIR, "servers")
+IMPORT_DIR = os.path.join(BASE_DIR, "import")
 TMP_DIR = os.path.join(BASE_DIR, "tmp")
 RUNTIMES_DIR = os.path.join(BASE_DIR, "runtimes")
 

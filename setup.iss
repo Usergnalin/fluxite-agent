@@ -198,6 +198,7 @@ begin
     DelTree(ExpandConstant('{commonappdata}\FluxiteAgent\logs'), True, True, True);
     DelTree(ExpandConstant('{commonappdata}\FluxiteAgent\installers'), True, True, True);
     DelTree(ExpandConstant('{commonappdata}\FluxiteAgent\tmp'), True, True, True);
+    DelTree(ExpandConstant('{commonappdata}\FluxiteAgent\import'), True, True, True);
     DeleteFile(ExpandConstant('{commonappdata}\FluxiteAgent\agent_id.txt'));
     DeleteFile(ExpandConstant('{commonappdata}\FluxiteAgent\agent.key'));
     DeleteFile(ExpandConstant('{commonappdata}\FluxiteAgent\servers.json'));

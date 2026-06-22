@@ -1,25 +1,108 @@
 FLUXITE AGENT — END USER LICENSE AGREEMENT
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+Last updated: 21/6/2026
+Software: Fluxite Agent ("the Agent")
+Licensor: [Ni Lang] ("Fluxite", "we", "us", "our")
 
-1. GRANT OF LICENSE
+> PLEASE READ CAREFULLY.** This Agreement governs software that makes changes to your computer, including installing networking software and modifying your firewall, and that runs a background service which executes commands sent from the Fluxite service. By installing or using the Agent, you consent to this behavior. If you do not agree, do not install or use the Agent.
 
-Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+1. DEFINITIONS
 
-2. RESTRICTIONS
+"Agent" means the Fluxite Agent software installed on your device, including updates.
+"Service" means the Fluxite central platform, API, dashboard, and tunnel infrastructure.
+"Device" means the computer or machine on which you install the Agent.
+"Game Server" means any Minecraft (or other) server instance you create, run, or manage on your Device using the Agent.
+"You" / "User" means the individual or entity installing or operating the Agent.
 
-Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
+2. GRANT OF LICENSE
 
-3. DISCLAIMER OF WARRANTIES
+Subject to your compliance with this Agreement, Fluxite grants you a limited, non-exclusive, non-transferable, revocable license to install and use the Agent on Devices you own or are authorized to control, solely for the purpose of managing Game Servers through the Service.
+The Agent is licensed, not sold. Fluxite and its licensors retain all rights, title, and interest in the Agent not expressly granted to you.
+If portions of the Agent are made available under an open-source license, those portions are governed by their respective license terms (see Section 7), which prevail over this Agreement to the extent of any conflict for those portions only.
 
-Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet consectetur.
+3. WHAT THE AGENT DOES
 
-4. LIMITATION OF LIABILITY
+You acknowledge and expressly consent that, when installed and running, the Agent will:
 
-At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident.
+a) Install and configure WireGuard (or equivalent VPN/tunnel software) on your Device to establish a secure network tunnel to the Service
+b) Create, modify, and remove firewall rules scoped to the Agent's network interface, in order to restrict what that interface can access and to route Game Server traffic
+c) Run a background network service that listens for and executes commands issued by the Service or by you through the Service, including but not limited to: starting and stopping Game Servers, installing or removing modpacks and server software, modifying server configuration files, and reading server status, logs, and resource usage
+d) Transmit operational data to the Service as described in Section 8
+e) Update itself automatically or on demand (see Section 9).
 
-5. TERMINATION
+You confirm you understand that the Agent receives instructions over a network and acts on them, and that this is the intended and necessary function of the software. The Agent is designed to operate with the minimum privileges required for these functions and to confine its firewall changes to its own network interface.
 
-Similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio.
+4. RESTRICTIONS
 
-By clicking "I accept the agreement" you agree to be bound by the terms above.
+You agree NOT to, and not to permit any third party to:
+a) Use the Agent or the tunnel to transmit, route, or proxy traffic unrelated to managing legitimate Game Servers (including but not limited to: general-purpose VPN traffic, peer-to-peer piracy, command-and-control or malware traffic, denial-of-service traffic, or any unlawful content including CSAM)
+b) Use the Agent to host or distribute content that is illegal, infringing, or that violates the rights of others
+c) Reverse engineer, decompile, or disassemble the Agent, except where this restriction is prohibited by law or permitted by an applicable open-source license
+d) Remove, alter, or obscure any proprietary notices
+e) Use the Agent to gain unauthorized access to any system, network, or data
+f) Resell, sublicense, or offer the Agent as a managed service to third parties without our written permission
+g) Circumvent or interfere with the firewall scoping, privilege limits, or security controls of the Agent or Service
+h) Use the Agent in violation of the **Minecraft End User License Agreement and Commercial Usage Guidelines** published by Mojang/Microsoft, or any other applicable third-party terms.
+
+We may suspend or terminate your access for suspected violations (see Section 12).
+
+5. YOUR RESPONSIBILITIES
+
+You are solely responsible for:
+a) The Device the Agent runs on, including its security, physical access, and the operating system underneath the Agent
+b) Any Game Server you run, including all content, mods, plugins, and the data of any player who connects to it
+c) Compliance with all laws applicable to you and to the Game Servers you operate, including data protection laws and the licensing terms of any game, mod, or software you deploy
+d) Acting as the data controller for any personal data collected by or through your Game Servers (e.g., player usernames, chat, IP addresses). Fluxite acts only as a conduit/processor for the limited operational data described in Section 8
+e) Maintaining your own backups. The Agent and Service are not a backup solution.
+
+6. SECURITY ACKNOWLEDGMENT
+
+The Agent opens a network tunnel and executes remote commands by design. While the Agent restricts its network interface and operates with limited privileges, no software is perfectly secure. You acknowledge that running networked server-management software carries inherent risk, and you accept that risk. You agree to keep the Agent updated and to report suspected vulnerabilities to usernilang@gmail.com.
+
+7. OPEN-SOURCE AND THIRD-PARTY COMPONENTS
+
+The Agent installs and depends on third-party software, including without limitation WireGuard. These components are licensed by their respective authors under their own terms, and your use of them is subject to those terms. Fluxite makes no warranty regarding third-party components and is not responsible for them. A list of components and licenses is available at https://github.com/Usergnalin/fluxite-agent.
+To the extent the Agent itself is offered under an open-source license, the text of that license accompanies the Agent and governs the open-source portions.
+
+8. DATA COLLECTION AND PRIVACY
+
+To operate, the Agent and Service process limited data, which may include: your account identifier, Device identifiers and basic hardware/resource statistics, IP addresses, Agent and Game Server status and logs, and tunnel connection metadata. Game traffic routed through the tunnel may transit our infrastructure.
+We use this data to provide, secure, and improve the Service. We do not sell your personal data. Our handling of personal data is described in our Privacy Policy at http://fluxite.io, which is incorporated by reference. Where we process personal data on your behalf as a processor, the Privacy Policy and any applicable Data Processing Agreement govern that processing.
+
+9. UPDATES
+
+The Agent may download and install updates automatically or when prompted, to maintain security and compatibility. Updates are subject to this Agreement unless accompanied by separate terms. We may modify, suspend, or discontinue features of the Agent or Service at any time.
+
+10. DISCLAIMER OF WARRANTIES
+
+THE AGENT AND SERVICE ARE PROVIDED **"AS IS"** AND **"AS AVAILABLE"**, WITHOUT WARRANTY OF ANY KIND, WHETHER EXPRESS, IMPLIED, OR STATUTORY, INCLUDING WITHOUT LIMITATION IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+FLUXITE DOES NOT WARRANT THAT THE AGENT WILL BE UNINTERRUPTED, ERROR-FREE, OR SECURE, THAT DEFECTS WILL BE CORRECTED, OR THAT THE AGENT IS FREE OF HARMFUL COMPONENTS. YOU INSTALL AND USE THE AGENT AT YOUR OWN RISK.
+
+11. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, FLUXITE AND ITS OFFICERS, CONTRIBUTORS, AND SUPPLIERS WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR EXEMPLARY DAMAGES, OR FOR ANY LOSS OF PROFITS, DATA, GOODWILL, OR SERVER CONTENT, ARISING OUT OF OR RELATING TO THE AGENT OR SERVICE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+THIS INCLUDES, WITHOUT LIMITATION, DAMAGES ARISING FROM: SYSTEM OR FIREWALL CHANGES MADE BY THE AGENT; SECURITY INCIDENTS; LOSS OR CORRUPTION OF GAME SERVERS OR DATA; UNAUTHORIZED ACCESS; OR THIRD-PARTY SOFTWARE.
+FLUXITE'S TOTAL AGGREGATE LIABILITY FOR ALL CLAIMS RELATING TO THE AGENT OR SERVICE WILL NOT EXCEED THE GREATER OF (A) THE AMOUNT YOU PAID FLUXITE FOR THE AGENT IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM, OR (B) SGD 100.
+
+12. INDEMNIFICATION
+
+You agree to indemnify, defend, and hold harmless Fluxite and its officers, contributors, and suppliers from and against any claims, damages, liabilities, and expenses (including reasonable legal fees) arising out of or related to: (a) your use of the Agent or Service; (b) any Game Server you operate and any data of players connecting to it; (c) your violation of this Agreement or any law; (d) any traffic you route through the tunnel; and (e) your infringement of any third-party rights.
+
+13. TERMINATION
+
+This Agreement is effective until terminated. It terminates automatically if you breach it. We may suspend or terminate your license or access to the Service at any time for suspected violations, abuse, or unlawful use. Upon termination, you must stop using and uninstall the Agent. The Agent provides an uninstall process that removes its service and reverts the firewall rules and tunnel configuration it created.
+Sections that by their nature should survive termination (including Sections 7, 8, 10, 11, 12, 14) survive.
+
+14. GOVERNING LAW AND DISPUTES
+
+This Agreement is governed by the laws of Singapore, without regard to conflict-of-law principles. The courts of Singapore have exclusive jurisdiction over any dispute arising out of or relating to this Agreement, subject to any non-waivable rights you have under your local law.
+
+15. CHANGES TO THIS AGREEMENT
+
+We may update this Agreement from time to time. Material changes will be notified through the Service or the Agent. Continued use of the Agent after changes take effect constitutes acceptance.
+
+16. ENTIRE AGREEMENT, SEVERABILITY
+
+This Agreement, together with the Privacy Policy and any referenced terms, is the entire agreement between you and Fluxite regarding the Agent. If any provision is held unenforceable, the remaining provisions remain in effect. Our failure to enforce any provision is not a waiver.
+
+By clicking "I accept the agreement," or by installing or using the Agent, you acknowledge that you have read and agree to be bound by the terms above, including your consent to the system modifications described in Section 3.

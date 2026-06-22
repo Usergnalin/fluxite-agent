@@ -228,5 +228,6 @@ agent_id.txt
 *.conf
 servers.json
 servers/
+import/
 tmp/
 logs/
