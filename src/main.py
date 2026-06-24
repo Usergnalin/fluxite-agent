@@ -8,25 +8,76 @@ MC Server Agent — entry point.
 4. Reads commands from the queue and logs them (execution to be added later).
 """
 
-import logging
-import queue
-import sys
-import os
-import subprocess
-import requests
 import argparse
-import shutil
 import ctypes
+import json
+import logging
+import os
+import queue
+import shutil
+import subprocess
+import sys
+import zipfile
 
-from auth import AgentAuth, link_agent, load_signing_key, load_agent_id, unlink_agent_with_api
+import requests
+
+# Local modules
+from agent_log_manager import AgentLogManager, create_agent_file_handler, rotate_agent_logs
+from auth import AgentAuth, link_agent, load_agent_id, load_signing_key, unlink_agent_with_api
 from commands import CommandQueue, CommandType
+from config import (
+    AGENT_URL,
+    BASE_DIR,
+    COMMAND_FEEDBACK_URL_TPL,
+    COMMAND_STATUS_URL_TPL,
+    CREATE_SERVER_URL,
+    DEFAULT_MODULE_ICON_URL,
+    DELETE_MODULE_URL_TPL,
+    DELETE_SERVER_URL_TPL,
+    IMPORT_DIR,
+    JDK_VERSIONS,
+    MODPACK_DOWNLOAD_URL_TPL,
+    MODRINTH_USER_AGENT,
+    MODULE_DOWNLOAD_URL_TPL,
+    MODULE_TYPE_FOLDERS,
+    REPORT_MODULES_URL_TPL,
+    REQUIRED_DOWNLOADS,
+    REQUEST_TIMEOUT,
+    RUNTIMES_DIR,
+    SERVERS_BASE_DIR,
+    TMP_DIR,
+    UPDATE_MODULE_URL_TPL,
+    UPDATE_SERVER_THUMBNAIL,
+    VALID_MODULE_TYPES,
+    WG_INTERFACE,
+    get_jdk_download_config,
+)
+from installer import (
+    copy_files,
+    detect_entrypoint_from_metadata,
+    download_and_extract,
+    download_file,
+    get_bulk_project_data_from_hashes,
+    get_modrinth_project_data,
+    list_modules_and_assign_ids,
+    parse_server_properties,
+    set_server_icon,
+    setup_server_directory,
+    unzip,
+    update_server_properties,
+)
+from models import ServerMetadata, ServerRegistry
+from modpack_installer import (
+    apply_overrides,
+    cleanup_server_directory,
+    download_manifest_files,
+    extract_manifest_from_mrpack,
+    parse_manifest_dependencies,
+)
+from network import find_wireguard_exe, install_wireguard_tunnel, uninstall_wireguard_tunnel
 from poller import CommandPoller
 from server_manager import MCServerManager
-from models import ServerRegistry, ServerMetadata
-from config import SERVERS_BASE_DIR, CREATE_SERVER_URL, UPDATE_SERVER_THUMBNAIL, REQUEST_TIMEOUT, BASE_DIR, WG_INTERFACE, IMPORT_DIR
-from agent_log_manager import AgentLogManager, rotate_agent_logs, create_agent_file_handler
 from utils import uuid7
-from network import find_wireguard_exe, install_wireguard_tunnel, uninstall_wireguard_tunnel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -72,6 +123,7 @@ def load_auth() -> AgentAuth:
     agent_id = load_agent_id()
 
     if not signing_key or not agent_id:
+        log.fatal("No API credentials found. setup agent with main.py setup <linking_code> <agent_name>")
         sys.exit(1)
 
     auth = AgentAuth(signing_key, agent_id)
@@ -157,12 +209,8 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
             return True, f"Agent logs sent successfully (lines {start_line}-{end_line})"
         else:
             return False, f"Failed to send logs: Invalid log range [{start_line}, {end_line}]"
-
-    # Server Creation
     elif cmd.type == CommandType.CREATE_SERVER:
         log.info("Processing CREATE_SERVER command...")
-        from config import SERVERS_BASE_DIR
-        from installer import setup_server_directory, parse_server_properties
         
         server_name = cmd.payload.get("name")
         mc_version = cmd.payload.get("mc_version")
@@ -195,6 +243,7 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
                     log.info("Cleaning up failed installation directory: %s", server_path)
                     shutil.rmtree(server_path)
                 return False, f"Server creation failed: Failed to download and install server JAR for {server_name}"
+            
         except Exception as e:
             log.error("Exception during server %s installation: %s", server_id, e)
             if os.path.exists(server_path):
@@ -229,19 +278,9 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
             return True, f"Server {server_name} created and started successfully"
         else:
             return True, f"Server {server_name} created successfully but failed to start"
-
-    # Modpack Creation
     elif cmd.type == CommandType.CREATE_MODPACK:
         log.info("Processing CREATE_MODPACK command...")
-        from config import MODPACK_DOWNLOAD_URL_TPL, MODRINTH_USER_AGENT, TMP_DIR, SERVERS_BASE_DIR
-        from installer import download_file, setup_server_directory, parse_server_properties
-        from modpack_installer import (
-            extract_manifest_from_mrpack,
-            parse_manifest_dependencies,
-            download_manifest_files,
-            apply_overrides,
-            cleanup_server_directory
-        )
+
         
         modpack_name = cmd.payload.get("name")
         project_id = cmd.payload.get("project_id")
@@ -376,6 +415,120 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
                 log.info("Cleaning up temporary mrpack file after failure: %s", mrpack_path)
                 os.remove(mrpack_path)
             return False, f"Modpack creation failed: {str(e)}"
+    elif cmd.type == CommandType.IMPORT_SERVER:
+        log.info("Processing IMPORT_SERVER command...")
+
+        server_name = cmd.payload.get("server_name")
+        import_source = cmd.payload.get("import_source")
+        mc_version = cmd.payload.get("mc_version")
+        loader_type = cmd.payload.get("loader_type")
+        thumbnail_url = cmd.payload.get("server_thumbnail", None)
+
+        if not server_name or not mc_version or not loader_type or not import_source:
+            log.error("IMPORT_SERVER failed: 'server_name', 'mc_version' and 'loader_type', 'import_source' are required.")
+            return False, "Server creation failed: Missing required parameters (server_name, mc_version, loader_type, import_source)"
+        
+        if not import_source in os.listdir(IMPORT_DIR):
+            log.error("IMPORT_SERVER failed: import_source not in import directory")
+            return False, "Server import failed: Could not find import source in import directory"
+        
+        import_source_path = os.path.join(IMPORT_DIR, import_source)
+
+        server_id = uuid7()
+        port = registry.get_next_available_port()
+        server_path = os.path.join(SERVERS_BASE_DIR, server_id)
+
+        try:
+            if os.path.isdir(import_source_path):
+                copy_files(import_source_path, server_path)
+            elif zipfile.is_zipfile(import_source_path):
+                unzip(import_source_path, server_path)
+            else:
+                log.error("IMPORT_SERVER failed: invalid import source")
+                return False, "Server import failed: Invalid import source, source needs to be zip or a folder"
+            entrypoint, java_version = detect_entrypoint_from_metadata(server_path, loader_type, mc_version)
+            if not entrypoint: raise ValueError("Unable to detect entrypoint")
+            # Accept EULA automatically
+            with open(os.path.join(server_path, "eula.txt"), "w") as f:
+                f.write("eula=true\n")
+
+            # Overwrite relevant server properties
+            if not update_server_properties(server_path, {
+                "server-port": port,
+                "query.port": port,
+                "motd": server_name
+            }): raise ValueError("Failed to update server.properties")
+            
+            # Set server icon
+            if thumbnail_url:
+                set_server_icon(server_path, thumbnail_url)
+
+            properties = parse_server_properties(server_path)
+        
+            # Add mc_version and loader_type to properties
+            properties["mc_version"] = mc_version
+            properties["loader_type"] = loader_type
+
+            modules = list_modules_and_assign_ids(server_path)
+
+            headers = {"User-Agent": MODRINTH_USER_AGENT}
+            try:
+                modules = get_bulk_project_data_from_hashes(modules, headers)
+            except Exception as e:
+                log.warning("Failed to get module data from modrinth: %s", e)
+            
+            modules_metadata = []
+            for module in modules:
+                modules_metadata.append({
+                    "module_id": module.get("module_id"),
+                    "module_type": module.get("module_type"),
+                    "module_name": module.get("module_name") or module.get("file_name"),
+                    "module_enabled": True,
+                    "module_metadata": {
+                        "icon_url": module.get("icon_url"),
+                        "project_id": module.get("project_id"),
+                        "version_id": module.get("version_id"),
+                        "file_name": module.get("file_name"),
+                    }
+                })
+
+        except Exception as e:
+            log.error("Exception during import: %s", e)
+            if os.path.exists(server_path):
+                log.info("Cleaning up after exception in %s: %s", server_id, server_path)
+                shutil.rmtree(server_path)
+            return False, f"Server import failed: Exception during import - {str(e)}"
+        
+        meta = ServerMetadata(
+            id=server_id,
+            name=server_name,
+            port=port,
+            path=server_path,
+            entrypoint=entrypoint,
+            server_thumbnail=thumbnail_url,
+            java_version=java_version,
+            properties=properties,
+            modules=modules_metadata
+        )
+
+        # Register with registry and API
+        registry.add_server(meta)
+        register_server_with_api(auth, meta)
+        
+        # Report installed modules to API
+        report_installed_modules(auth, server_id, modules_metadata)
+        
+        mgr = MCServerManager(meta, auth)
+        instances[server_id] = mgr
+        return True, f"Server {server_name} imported successfully"
+    
+    elif cmd.type == CommandType.LIST_AVAILABLE_IMPORTS:
+        entries = os.listdir(IMPORT_DIR)
+        result = {
+            "import_dir": IMPORT_DIR,
+            "items": entries
+        }
+        return True, json.dumps(result)
 
     # Server-specific commands
     if not cmd.server_id:
@@ -463,9 +616,6 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
             
         server_path = mgr.meta.path
         
-        from config import MODULE_DOWNLOAD_URL_TPL, MODRINTH_USER_AGENT, VALID_MODULE_TYPES, MODULE_TYPE_FOLDERS, DEFAULT_MODULE_ICON_URL
-        from installer import get_modrinth_project_data
-        
         downloaded_files = []
         new_modules_metadata = []
         
@@ -502,7 +652,6 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
                 dest_path = os.path.join(dest_folder, module_id + ".jar")
                 
                 headers = {"User-Agent": MODRINTH_USER_AGENT}
-                from installer import download_file
                 if download_file(url, dest_path, expected_hash=file_hash, headers=headers):
                     # Fetch project data from Modrinth API
                     project_data = get_modrinth_project_data(project_id, DEFAULT_MODULE_ICON_URL)
@@ -565,12 +714,12 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
             # Determine module path based on module_type from registry
             if module_entry and module_entry.get("module_type"):
                 module_type = module_entry.get("module_type")
-                from config import MODULE_TYPE_FOLDERS
+
                 folder = MODULE_TYPE_FOLDERS.get(module_type, 'modules')
                 module_path = os.path.join(server_path, folder, f"{module_id}.jar")
             else:
                 # Fallback: search all module folders
-                from config import MODULE_TYPE_FOLDERS
+
                 module_path = None
                 for folder in MODULE_TYPE_FOLDERS.values():
                     candidate_path = os.path.join(server_path, folder, f"{module_id}.jar")
@@ -623,7 +772,6 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
             
             # Find the disabled file
             module_type = module_entry.get("module_type", "mod")
-            from config import MODULE_TYPE_FOLDERS
             folder = MODULE_TYPE_FOLDERS.get(module_type, 'mods')
             server_path = mgr.meta.path
             
@@ -673,7 +821,6 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
             
             # Find the enabled file
             module_type = module_entry.get("module_type", "mod")
-            from config import MODULE_TYPE_FOLDERS
             folder = MODULE_TYPE_FOLDERS.get(module_type, 'mods')
             server_path = mgr.meta.path
             
@@ -737,7 +884,6 @@ def handle_command(cmd, poller: CommandPoller, registry: ServerRegistry,
 
 def report_command_status(auth: AgentAuth, command_id: str, success: bool):
     """Report the success or failure of a command to the API."""
-    from config import COMMAND_STATUS_URL_TPL
     
     url = COMMAND_STATUS_URL_TPL.format(command_id)
     payload = {"command_status": "success" if success else "failure"}
@@ -752,7 +898,6 @@ def report_command_status(auth: AgentAuth, command_id: str, success: bool):
 
 def report_command_feedback(auth: AgentAuth, command_id: str, feedback: str):
     """Send user-friendly feedback for a command."""
-    from config import COMMAND_FEEDBACK_URL_TPL
     
     url = COMMAND_FEEDBACK_URL_TPL.format(command_id)
     payload = {"command_feedback": feedback}
@@ -767,7 +912,6 @@ def report_command_feedback(auth: AgentAuth, command_id: str, feedback: str):
 
 def report_agent_offline(auth: AgentAuth):
     """Report that the agent is going offline."""
-    from config import AGENT_URL
     payload = {"agent_status": "offline"}
     try:
         headers = auth.auth_header()
@@ -781,7 +925,6 @@ def report_agent_offline(auth: AgentAuth):
 
 def report_installed_modules(auth: AgentAuth, server_id: str, modules: list[dict]):
     """Report the list of newly installed modules to the API."""
-    from config import REPORT_MODULES_URL_TPL
     url = REPORT_MODULES_URL_TPL.format(server_id)
     try:
         headers = auth.auth_header()
@@ -793,7 +936,6 @@ def report_installed_modules(auth: AgentAuth, server_id: str, modules: list[dict
 
 def report_module_deleted(auth: AgentAuth, module_id: str):
     """Report the deletion of a module to the API."""
-    from config import DELETE_MODULE_URL_TPL
     url = DELETE_MODULE_URL_TPL.format(module_id)
     try:
         headers = auth.auth_header()
@@ -805,7 +947,6 @@ def report_module_deleted(auth: AgentAuth, module_id: str):
 
 def report_module_status(auth: AgentAuth, module_id: str, module_enabled: bool):
     """Report the enabled/disabled status of a module to the API via PATCH."""
-    from config import UPDATE_MODULE_URL_TPL
     url = UPDATE_MODULE_URL_TPL.format(module_id)
     payload = {"module_enabled": "true" if module_enabled else "false"}
     try:
@@ -818,7 +959,6 @@ def report_module_status(auth: AgentAuth, module_id: str, module_enabled: bool):
 
 def report_server_deleted(auth: AgentAuth, server_id: str):
     """Report the deletion of a server to the API."""
-    from config import DELETE_SERVER_URL_TPL
     url = DELETE_SERVER_URL_TPL.format(server_id)
     try:
         headers = auth.auth_header()
@@ -838,8 +978,6 @@ def install_required_files() -> bool:
     Returns True if all files are present/ downloaded successfully,
     False if any download failed.
     """
-    from config import REQUIRED_DOWNLOADS, JDK_VERSIONS, RUNTIMES_DIR, get_jdk_download_config
-    from installer import download_file, download_and_extract
     
     log.info("Checking required files...")
     all_ok = True

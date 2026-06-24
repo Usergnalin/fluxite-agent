@@ -14,9 +14,16 @@ import tempfile
 import shutil
 import re
 from PIL import Image
+import json
 import io
+from pathlib import Path
 from utils import uuid7
-from config import SERVERS_BASE_DIR, REQUEST_TIMEOUT, FABRIC_INSTALLER_PATH, QUILT_INSTALLER_PATH, JVM_PATH, VANILLA_MANIFEST, NEOFORGE_INSTALLER_URL, FORGE_INSTALLER_URL, MODRINTH_USER_AGENT, INSTALLER_TIMEOUT, TMP_DIR
+from config import\
+    SERVERS_BASE_DIR, REQUEST_TIMEOUT, FABRIC_INSTALLER_PATH,\
+    QUILT_INSTALLER_PATH, JVM_PATH, VANILLA_MANIFEST, NEOFORGE_INSTALLER_URL,\
+    FORGE_INSTALLER_URL, MODRINTH_USER_AGENT, INSTALLER_TIMEOUT, TMP_DIR,\
+    MODULE_TYPE_FOLDERS, MODULE_FILE_TYPES, MODRINTH_BULK_BATCH_SIZE,\
+    MODRINTH_BULK_VERSIONS_FROM_HASHES_URL, MODRINTH_BULK_PROJECTS_URL
 
 log = logging.getLogger(__name__)
 
@@ -119,6 +126,24 @@ def download_file(url: str, dest_path: str, expected_hash: str = None, headers: 
         log.error("Download failed: %s", e)
         return False
 
+def unzip(zip_path, destination_path):
+    os.makedirs(destination_path, exist_ok=True)
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(destination_path)
+
+def copy_files(source_path, destination_path):
+    os.makedirs(destination_path, exist_ok=True)
+    
+    for item in os.listdir(source_path):
+        src = os.path.join(source_path, item)
+        dst = os.path.join(destination_path, item)
+        
+        if os.path.isdir(src):
+            # Copy entire directory recursively
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            # Copy individual file
+            shutil.copy2(src, dst)
 
 def download_and_extract(url: str, extract_to: str, expected_hash: str = None, archive_type: str = "auto") -> bool:
     """Download an archive file, verify its hash, and extract it to the specified directory.
@@ -279,7 +304,70 @@ def get_modrinth_project_data(project_id: str, default_icon_url: str) -> dict:
         "server_side": "unknown"
     }
 
-def setup_server_directory(server_id: str, game_version: str, loader_version: str, loader_type: str, port: int, motd: str, server_thumnbnail: str) -> tuple[str, str] | None:
+def get_bulk_project_data_from_hashes(modules: list[dict], headers: dict) -> list[dict]:
+    """Bulk fetch project data from Modrinth API using file hashes.
+    Uses MODRINTH_BULK_VERSIONS_FROM_HASHES_URL to resolve hashes to versions,
+    then MODRINTH_BULK_PROJECTS_URL to fetch project metadata.
+    Batches requests to respect MODRINTH_BULK_BATCH_SIZE limit.
+    Raises exception on API failure.
+    Modules with no matching hash are returned as-is.
+    """
+    hashes = [m["hash"] for m in modules]
+
+    # Step 1: Resolve hashes -> version data (in batches)
+    hash_to_version = {}
+    for i in range(0, len(hashes), MODRINTH_BULK_BATCH_SIZE):
+        batch = hashes[i:i + MODRINTH_BULK_BATCH_SIZE]
+        resp = requests.post(
+            MODRINTH_BULK_VERSIONS_FROM_HASHES_URL,
+            json={"hashes": batch, "algorithm": "sha1"},
+            headers=headers,
+            timeout=REQUEST_TIMEOUT
+        )
+        resp.raise_for_status()
+        hash_to_version.update(resp.json())
+        log.debug("Fetched hash batch %d/%d (%d hashes)",
+                  (i // MODRINTH_BULK_BATCH_SIZE) + 1,
+                  (len(hashes) + MODRINTH_BULK_BATCH_SIZE - 1) // MODRINTH_BULK_BATCH_SIZE,
+                  len(batch))
+
+    # Step 2: Collect unique project IDs from resolved hashes
+    project_ids = list({v["project_id"] for v in hash_to_version.values()})
+
+    # Step 3: Fetch project metadata (in batches)
+    project_data = {}
+    for i in range(0, len(project_ids), MODRINTH_BULK_BATCH_SIZE):
+        batch = project_ids[i:i + MODRINTH_BULK_BATCH_SIZE]
+        resp = requests.get(
+            MODRINTH_BULK_PROJECTS_URL,
+            params={"ids": json.dumps(batch)},
+            headers=headers,
+            timeout=REQUEST_TIMEOUT
+        )
+        resp.raise_for_status()
+        for proj in resp.json():
+            project_data[proj["id"]] = proj
+        log.debug("Fetched project batch %d/%d (%d projects)",
+                  (i // MODRINTH_BULK_BATCH_SIZE) + 1,
+                  (len(project_ids) + MODRINTH_BULK_BATCH_SIZE - 1) // MODRINTH_BULK_BATCH_SIZE,
+                  len(batch))
+
+    # Step 4: Enrich modules that had a matching hash
+    result = []
+    for module in modules:
+        enriched = dict(module)
+        version = hash_to_version.get(module["hash"])
+        if version:
+            proj = project_data.get(version["project_id"], {})
+            enriched["project_id"] = version["project_id"]
+            enriched["version_id"] = version["id"]
+            enriched["module_name"] = proj.get("title") or proj.get("name")
+            enriched["icon_url"] = proj.get("icon_url")
+        result.append(enriched)
+
+    return result
+
+def setup_server_directory(server_id: str, game_version: str, loader_version: str, loader_type: str, port: int, motd: str, server_thumbnail: str) -> tuple[str, str] | None:
     """
     Set up a new server directory using local fabric-installer.jar.
     Returns the name of the jar file on success (fabric-server-launch.jar).
@@ -417,8 +505,8 @@ def setup_server_directory(server_id: str, game_version: str, loader_version: st
             f.write(f"motd={motd}\n")
         
         # Set server icon
-        if server_thumnbnail:
-            set_server_icon(server_dir, server_thumnbnail)
+        if server_thumbnail:
+            set_server_icon(server_dir, server_thumbnail)
         
         java_version = get_java_version(game_version)
 
@@ -429,6 +517,220 @@ def setup_server_directory(server_id: str, game_version: str, loader_version: st
     except Exception as e:
         log.error("Failed to run installer: %s", e)
         return None
+    
+def update_server_properties(server_dir: str, updates: dict[str, str]) -> bool:
+    """
+    Update specific keys in an existing server.properties without touching other settings.
+    Appends any keys that don't already exist in the file.
+    """
+    props_path = os.path.join(server_dir, "server.properties")
+
+    try:
+        # Read existing lines if file exists, otherwise start fresh
+        if os.path.exists(props_path):
+            with open(props_path, "r") as f:
+                lines = f.readlines()
+        else:
+            lines = []
+
+        remaining = set(updates.keys())
+
+        new_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Preserve comments and blank lines untouched
+            if not stripped or stripped.startswith("#"):
+                new_lines.append(line)
+                continue
+
+            if "=" in stripped:
+                key, _ = stripped.split("=", 1)
+                key = key.strip()
+                if key in updates:
+                    new_lines.append(f"{key}={updates[key]}\n")
+                    remaining.discard(key)
+                    continue
+
+            new_lines.append(line)
+
+        # Append any keys that weren't already present
+        for key in remaining:
+            new_lines.append(f"{key}={updates[key]}\n")
+
+        with open(props_path, "w") as f:
+            f.writelines(new_lines)
+
+        return True
+
+    except OSError as e:
+        log.error("Failed to update server.properties: %s", e)
+        return False
+
+def detect_entrypoint_from_metadata(
+    server_dir: str,
+    loader_type: str,
+    game_version: str,
+) -> tuple[str, str] | None:
+    """
+    Detect entrypoint for an existing server given declared loader type and MC version.
+    Returns (entrypoint, java_version) or None if the expected entrypoint isn't found.
+    """
+    
+    if loader_type == "fabric":
+        entrypoint = "fabric-server-launch.jar"
+    
+    elif loader_type == "quilt":
+        entrypoint = "quilt-server-launch.jar"
+    
+    elif loader_type == "vanilla":
+        entrypoint = "server.jar"
+    
+    elif loader_type in ("forge", "neoforge"):
+        run_script = "run.bat" if os.name == "nt" else "run.sh"
+        if os.path.exists(os.path.join(server_dir, run_script)):
+            entrypoint = run_script
+        else:
+            # Old-style Forge jar (pre-1.17)
+            for file in os.listdir(server_dir):
+                if file.startswith("forge-") and file.endswith(".jar") and "installer" not in file:
+                    entrypoint = file
+                    break
+            else:
+                log.error("Could not find entrypoint for %s in %s", loader_type, server_dir)
+                return None
+    
+    else:
+        log.error("Unsupported loader type: %s", loader_type)
+        return None
+    
+    if not os.path.exists(os.path.join(server_dir, entrypoint)):
+        log.error("Expected entrypoint %s not found in %s", entrypoint, server_dir)
+        return None
+
+    java_version = get_java_version(game_version)
+    if not java_version:
+        log.error("Could not determine Java version for MC %s", game_version)
+        return None
+
+    return entrypoint, java_version
+
+# def get_mod_name_from_jar(jar_path: str) -> str | None:
+#     """
+#     Returns the mod's display name from jar metadata, falling back to filename.
+#     Returns None only if the file is not a valid jar.
+#     """
+#     try:
+#         with zipfile.ZipFile(jar_path) as zf:
+#             names = zf.namelist()
+
+#             # Fabric / Quilt
+#             if "fabric.mod.json" in names:
+#                 with zf.open("fabric.mod.json") as f:
+#                     data = json.load(f)
+#                 return data.get("name") or data.get("id")
+
+#             # NeoForge
+#             if "META-INF/neoforge.mods.toml" in names:
+#                 with zf.open("META-INF/neoforge.mods.toml") as f:
+#                     content = f.read().decode()
+#                 in_mods = False
+#                 for line in content.splitlines():
+#                     s = line.strip()
+#                     if s == "[[mods]]":
+#                         in_mods = True
+#                     elif in_mods and s.startswith("displayName"):
+#                         return s.partition("=")[2].strip().strip('"')
+
+#             # Forge modern
+#             if "META-INF/mods.toml" in names:
+#                 with zf.open("META-INF/mods.toml") as f:
+#                     content = f.read().decode()
+#                 in_mods = False
+#                 for line in content.splitlines():
+#                     s = line.strip()
+#                     if s == "[[mods]]":
+#                         in_mods = True
+#                     elif in_mods and s.startswith("displayName"):
+#                         return s.partition("=")[2].strip().strip('"')
+
+#             # Forge legacy
+#             if "mcmod.info" in names:
+#                 with zf.open("mcmod.info") as f:
+#                     data = json.loads(f.read().decode())
+#                 mods = data if isinstance(data, list) else data.get("modList", [])
+#                 if mods:
+#                     return mods[0].get("name") or mods[0].get("modid")
+
+#     except zipfile.BadZipFile:
+#         return None
+#     except (KeyError, ValueError, OSError):
+#         pass
+
+#     return os.path.splitext(os.path.basename(jar_path))[0]
+
+def list_modules_and_assign_ids(server_dir: str) -> list:
+    """
+    List all modules in the Minecraft server directory
+    """
+    modules = []
+    
+    for module_type, folder_path in MODULE_TYPE_FOLDERS.items():
+        full_path = os.path.join(server_dir, folder_path)
+        
+        # Check if the folder exists
+        if not os.path.exists(full_path) or not os.path.isdir(full_path):
+            continue
+        
+        # Get expected file extensions for this module type
+        expected_extensions = MODULE_FILE_TYPES.get(module_type, [])
+        
+        # List all files in the directory (non-recursive)
+        try:
+            for file_name in os.listdir(full_path):
+                file_path = os.path.join(full_path, file_name)
+                
+                # Skip directories
+                if os.path.isdir(file_path):
+                    continue
+                
+                # Check if file has expected extension
+                file_ext = os.path.splitext(file_name)[1].lower()
+                if expected_extensions and file_ext not in expected_extensions:
+                    continue
+                
+                # Calculate SHA1 hash
+                try:
+                    sha1_hash = calculate_sha1(file_path)
+                    module_id = uuid7()
+                    path = Path(file_path)
+                    new_path = path.with_name(f"{module_id}{path.suffix}")
+                    path.rename(new_path)
+                except (IOError, OSError):
+                    # Skip files that can't be read
+                    continue
+                
+                modules.append({
+                    'module_id': module_id,
+                    'module_type': module_type,
+                    'file_name': file_name,
+                    'hash': sha1_hash
+                })
+                
+        except (OSError, PermissionError):
+            continue
+    
+    return modules
+
+def calculate_sha1(file_path: str) -> str:
+    sha1 = hashlib.sha1()
+    with open(file_path, 'rb') as f:
+        while True:
+            data = f.read(8192)
+            if not data:
+                break
+            sha1.update(data)
+    return sha1.hexdigest()
+
 
 def parse_server_properties(server_dir: str) -> dict:
     """Read server.properties and return as a dictionary."""

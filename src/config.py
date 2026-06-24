@@ -56,6 +56,7 @@ MODRINTH_USER_AGENT = "Usergnalin/mc_manager_api (usernilang@gmail.com)"
 MODRINTH_PROJECT_URL_TPL = "https://api.modrinth.com/v2/project/{project_id}"
 MODRINTH_BULK_PROJECTS_URL = "https://api.modrinth.com/v2/projects"
 MODRINTH_BULK_VERSIONS_URL = "https://api.modrinth.com/v2/versions"
+MODRINTH_BULK_VERSIONS_FROM_HASHES_URL = "https://api.modrinth.com/v2/version_files"
 MODRINTH_BULK_BATCH_SIZE = 50  # Max IDs per bulk API request
 DEFAULT_MODULE_ICON_URL = "https://cdn.modrinth.com/data/placeholder/icon.png"
 
@@ -103,6 +104,13 @@ MODULE_TYPE_FOLDERS = {
     'resource_pack': 'resourcepacks',
     'data_pack': 'world/datapacks',
     'plugin': 'plugins'
+}
+
+MODULE_FILE_TYPES = {
+    'mod': ['.jar'],
+    'resource_pack': ['.zip'],
+    'data_pack': ['.zip'],
+    'plugin': ['.jar']
 }
 
 # Required files to download on startup if missing

@@ -20,6 +20,8 @@ class CommandType(Enum):
     STOP_SERVER       = "stop_server"
     KILL_SERVER       = "kill_server"
     CREATE_SERVER     = "create_server"
+    IMPORT_SERVER = "import_server"
+    LIST_AVAILABLE_IMPORTS = "list_available_imports"
     MC_COMMAND        = "mc_command"
     INSTALL_MODULES      = "install_modules"
     DELETE_MODULE       = "delete_module"
